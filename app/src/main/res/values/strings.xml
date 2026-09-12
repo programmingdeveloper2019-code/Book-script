@@ -1,0 +1,18 @@
+<resources>
+    <string name="app_name">Yatal Library</string>
+    <string name="library_title">မြန်မာဒစ်ဂျစ်တယ် စာကြည့်တိုက်</string>
+    <string name="search_hint">စာအုပ်အမည်၊ စာရေးဆရာ၊ ကဏ္ဍဖြင့် ရှာဖွေပါ…</string>
+    <string name="all_categories">အားလုံး</string>
+    <string name="books_count">%d အုပ်</string>
+    <string name="btn_read">အစမ်းဖတ်</string>
+    <string name="btn_download">ဒေါင်းလုဒ်</string>
+    <string name="btn_retry">ပြန်လည်ကြိုးစားမည်</string>
+    <string name="loading_books">စာအုပ်များ ခေါ်ယူနေပါသည်…</string>
+    <string name="auto_sync_status">ဝဘ်ဆိုက်နှင့် အချိန်နှင့်တစ်ပြေးညီ ချိတ်ဆက်ထားသည်</string>
+    <string name="sync_latest">နောက်ဆုံးရ ဒေတာ စင့်ခ်လုပ်မည်</string>
+    <string name="no_books_found">စာအုပ် ရှာမတွေ့ပါ</string>
+    <string name="tab_books">စာအုပ်စင်</string>
+    <string name="tab_categories">ကဏ္ဍများ</string>
+    <string name="tab_favorites">သိမ်းဆည်းထားသော စာအုပ်များ</string>
+    <string name="offline_cache_badge">အော့ဖ်လိုင်း ကက်ရှ်</string>
+</resources>

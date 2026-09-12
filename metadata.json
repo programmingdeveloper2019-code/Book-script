@@ -1,0 +1,6 @@
+{
+  "name": "Yatal Library",
+  "description": "မြန်မာဒစ်ဂျစ်တယ် စာကြည့်တိုက် (Yatal Digital Library) - အွန်လိုင်းမှ စာအုပ်ပေါင်း ၁၀,၀၀၀ ကျော် ရှာဖွေ၊ ဖတ်ရှု၊ ဒေါင်းလုဒ်ရယူနိုင်သော စာအုပ်စင် App",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
