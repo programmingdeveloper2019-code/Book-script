@@ -6,6 +6,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,6 +32,7 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Refresh
@@ -48,6 +51,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarDuration
@@ -84,6 +88,7 @@ import com.example.ui.components.FilterBottomSheet
 import com.example.ui.components.GenreFilterBar
 import com.example.ui.components.LibraryTopBar
 import com.example.ui.components.PdfReaderScreen
+import com.example.ui.components.SwipeRefresh
 import com.example.ui.theme.AmberPrimary
 import com.example.ui.theme.DarkBackground
 import com.example.ui.theme.DarkCardBorder
@@ -171,12 +176,22 @@ fun YatalLibraryApp(
                 onClearSearch = { viewModel.clearSearch() },
                 searchScope = uiState.searchScope,
                 onSearchScopeChange = { viewModel.setSearchScope(it) },
+                titleSuggestions = uiState.titleSuggestions,
+                onSelectTitleSuggestion = { viewModel.selectTitleSuggestion(it) },
+                searchMatchCount = uiState.searchMatchCount,
                 suggestedAuthors = uiState.suggestedAuthors,
                 onSelectAuthorSuggestion = { viewModel.searchByAuthor(it) },
                 isRefreshing = uiState.isRefreshing,
                 isOffline = uiState.isOfflineMode,
                 lastSyncTime = uiState.lastSyncTime,
-                totalBooks = uiState.totalBooksCount,
+                totalBooks = if (uiState.selectedCategory != "ALL") {
+                    uiState.categories.find { it.name == uiState.selectedCategory }?.count ?: uiState.totalBooksCount
+                } else if (uiState.selectedGenre != "ALL") {
+                    uiState.genreCounts[uiState.selectedGenre] ?: uiState.totalBooksCount
+                } else {
+                    val totalInAll = uiState.categories.sumOf { it.count }
+                    if (totalInAll > 0) totalInAll else uiState.totalBooksCount
+                },
                 onSyncClick = { viewModel.syncAllFromWebsite() }
             )
         },
@@ -291,7 +306,8 @@ fun YatalLibraryApp(
                         onDownloadClick = { book -> DownloadHelper.downloadBook(context, book) },
                         onToggleFavorite = { viewModel.toggleFavorite(it) },
                         onDismissProgress = { viewModel.deleteReadingProgress(it) },
-                        onRetry = { viewModel.syncAllFromWebsite() }
+                        onRetry = { viewModel.syncAllFromWebsite() },
+                        onRefresh = { viewModel.refreshBooks() }
                     )
                 }
 
@@ -377,7 +393,8 @@ private fun BooksCatalogContent(
     onDownloadClick: (Book) -> Unit,
     onToggleFavorite: (Book) -> Unit,
     onDismissProgress: (Long) -> Unit,
-    onRetry: () -> Unit
+    onRetry: () -> Unit,
+    onRefresh: () -> Unit
 ) {
     val gridState = rememberLazyGridState()
 
@@ -398,11 +415,13 @@ private fun BooksCatalogContent(
     val isFilterActive = uiState.selectedGenre != "ALL" || uiState.selectedCategory != "ALL" || uiState.sortOrder != SortOption.RECENT
 
     Column(modifier = Modifier.fillMaxSize()) {
+        val totalLibCount = if (uiState.totalBooksCount > 0) uiState.totalBooksCount else uiState.categories.sumOf { it.count }
+
         // Genre / Topic Bar (Room Database Filter)
         GenreFilterBar(
             selectedGenre = uiState.selectedGenre,
             genreCounts = uiState.genreCounts,
-            totalCount = uiState.totalRoomCachedCount,
+            totalCount = totalLibCount,
             onSelectGenre = onGenreSelected,
             onOpenFilterSheet = onOpenFilterSheet
         )
@@ -411,7 +430,8 @@ private fun BooksCatalogContent(
         CategoryBar(
             categories = uiState.categories,
             selectedCategory = uiState.selectedCategory,
-            onSelectCategory = onCategorySelected
+            onSelectCategory = onCategorySelected,
+            totalCount = totalLibCount
         )
 
         // Active Filter Badges Bar (Room DB filter indicators)
@@ -465,6 +485,22 @@ private fun BooksCatalogContent(
             }
         }
 
+        val totalAvailable = when {
+            uiState.searchQuery.isNotBlank() -> uiState.searchMatchCount.coerceAtLeast(uiState.books.size)
+            uiState.selectedCategory != "ALL" -> {
+                uiState.categories.find { it.name == uiState.selectedCategory }?.count
+                    ?: (if (uiState.totalBooksCount > 0) uiState.totalBooksCount else uiState.books.size)
+            }
+            uiState.selectedGenre != "ALL" -> {
+                uiState.genreCounts[uiState.selectedGenre]
+                    ?: (if (uiState.totalBooksCount > 0) uiState.totalBooksCount else uiState.books.size)
+            }
+            else -> {
+                val sumAll = uiState.categories.sumOf { it.count }
+                if (sumAll > 0) sumAll else (if (uiState.totalBooksCount > 0) uiState.totalBooksCount else uiState.books.size)
+            }
+        }
+
         // Room Database & Real-Time Search status banner
         Box(
             modifier = Modifier
@@ -499,33 +535,48 @@ private fun BooksCatalogContent(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = if (uiState.searchQuery.isNotBlank()) {
-                            "“${uiState.searchQuery}” ရှာဖွေမှု (${uiState.searchScope.displayName})"
-                        } else {
-                            "Room Database မှ တိုက်ရိုက် စစ်ထုတ်ပြသထားသည်"
+                        text = when {
+                            uiState.searchQuery.isNotBlank() -> "“${uiState.searchQuery}” ရှာဖွေမှု (${uiState.searchScope.displayName})"
+                            uiState.selectedCategory != "ALL" -> "«${uiState.selectedCategory}» စာအုပ်များ"
+                            uiState.selectedGenre != "ALL" -> "«${uiState.selectedGenre}» စာအုပ်များ"
+                            else -> "စာအုပ်အားလုံး"
                         },
                         color = if (uiState.searchQuery.isNotBlank()) AmberPrimary else TextSecondary,
-                        fontSize = 10.5.sp,
-                        fontWeight = FontWeight.Medium,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
 
                 Text(
-                    text = "${numberFormat.format(uiState.books.size)} အုပ် တွေ့ရှိ",
+                    text = if (totalAvailable > uiState.books.size) {
+                        "${numberFormat.format(uiState.books.size)} / စုစုပေါင်း ${numberFormat.format(totalAvailable)} အုပ်"
+                    } else {
+                        "စုစုပေါင်း ${numberFormat.format(uiState.books.size)} အုပ်"
+                    },
                     color = AmberPrimary,
-                    fontSize = 10.5.sp,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
         }
 
-        // Books Grid
-        Box(modifier = Modifier.fillMaxSize()) {
+        // Books Grid Container with SwipeRefresh / Pull-to-refresh
+        SwipeRefresh(
+            isRefreshing = uiState.isRefreshing,
+            onRefresh = onRefresh,
+            modifier = Modifier
+                .fillMaxSize()
+                .testTag("book_list_swipe_refresh")
+                .testTag("swipe_refresh")
+                .testTag("pull_to_refresh")
+        ) {
             if (uiState.isLoading && uiState.books.isEmpty()) {
                 Box(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState()),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -552,6 +603,7 @@ private fun BooksCatalogContent(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
                         .padding(32.dp),
                     contentAlignment = Alignment.Center
                 ) {
@@ -613,6 +665,7 @@ private fun BooksCatalogContent(
                     items(uiState.books, key = { it.id }) { book ->
                         BookCard(
                             book = book,
+                            highlightQuery = uiState.searchQuery,
                             onBookClick = onBookClick,
                             onReadClick = onReadClick,
                             onDownloadClick = onDownloadClick,
@@ -641,6 +694,33 @@ private fun BooksCatalogContent(
                                         fontSize = 12.sp
                                     )
                                 }
+                            }
+                        }
+                    } else if (uiState.books.isNotEmpty() && totalAvailable > uiState.books.size) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            OutlinedButton(
+                                onClick = onLoadMore,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                                    .testTag("load_more_books_button"),
+                                shape = RoundedCornerShape(12.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, AmberPrimary.copy(alpha = 0.5f)),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = AmberPrimary
+                                )
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CloudDownload,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "နောက်ထပ် စာအုပ်များ ထပ်မံခေါ်ယူမည် (+60) • ${numberFormat.format(uiState.books.size)} / ${numberFormat.format(totalAvailable)} အုပ်",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
                             }
                         }
                     }

@@ -1,10 +1,15 @@
 package com.example.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -24,6 +29,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -71,6 +77,9 @@ fun LibraryTopBar(
     onClearSearch: () -> Unit,
     searchScope: SearchFilterScope = SearchFilterScope.ALL,
     onSearchScopeChange: (SearchFilterScope) -> Unit = {},
+    titleSuggestions: List<String> = emptyList(),
+    onSelectTitleSuggestion: (String) -> Unit = {},
+    searchMatchCount: Int = 0,
     suggestedAuthors: List<String> = emptyList(),
     onSelectAuthorSuggestion: (String) -> Unit = {},
     isRefreshing: Boolean,
@@ -251,19 +260,41 @@ fun LibraryTopBar(
                 },
                 trailingIcon = {
                     if (searchQuery.isNotEmpty()) {
-                        IconButton(
-                            onClick = {
-                                onClearSearch()
-                                focusManager.clearFocus()
-                            },
-                            modifier = Modifier.testTag("clear_search_btn")
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(end = 4.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "ရှင်းလင်းမည်",
-                                tint = TextSecondary,
-                                modifier = Modifier.size(16.dp)
-                            )
+                            if (searchMatchCount > 0) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(AmberPrimary.copy(alpha = 0.2f))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "$searchMatchCount အုပ်",
+                                        color = AmberPrimary,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                            IconButton(
+                                onClick = {
+                                    onClearSearch()
+                                    focusManager.clearFocus()
+                                },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .testTag("clear_search_btn")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "ရှင်းလင်းမည်",
+                                    tint = TextSecondary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                         }
                     }
                 },
@@ -319,6 +350,69 @@ fun LibraryTopBar(
                             fontSize = 11.sp,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                         )
+                    }
+                }
+            }
+        }
+
+        // Real-Time Quick Title Discovery Pills
+        AnimatedVisibility(
+            visible = searchQuery.isNotBlank() && titleSuggestions.isNotEmpty(),
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically()
+        ) {
+            LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp, bottom = 2.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                item {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(end = 2.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Bolt,
+                            contentDescription = null,
+                            tint = AmberPrimary,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                            text = "ခေါင်းစဉ်များ:",
+                            color = AmberPrimary,
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+                items(titleSuggestions) { title ->
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(AmberPrimary.copy(alpha = 0.18f))
+                            .border(0.8.dp, AmberPrimary.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                            .clickable {
+                                onSelectTitleSuggestion(title)
+                                focusManager.clearFocus()
+                            }
+                            .padding(horizontal = 8.dp, vertical = 3.5.dp)
+                            .testTag("title_suggestion_${title.hashCode()}")
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(text = "📖", fontSize = 10.sp)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = title,
+                                color = TextPrimary,
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1
+                            )
+                        }
                     }
                 }
             }

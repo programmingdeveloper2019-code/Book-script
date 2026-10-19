@@ -393,6 +393,7 @@ fun FavoritesView(
                         BookCard(
                             book = book,
                             readingProgress = readingProgressMap[book.id],
+                            highlightQuery = searchQuery,
                             onBookClick = onBookClick,
                             onReadClick = onReadClick,
                             onDownloadClick = onDownloadClick,

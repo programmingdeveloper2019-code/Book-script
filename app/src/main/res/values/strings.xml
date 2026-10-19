@@ -4,7 +4,7 @@
     <string name="search_hint">စာအုပ်အမည်၊ စာရေးဆရာ၊ ကဏ္ဍဖြင့် ရှာဖွေပါ…</string>
     <string name="all_categories">အားလုံး</string>
     <string name="books_count">%d အုပ်</string>
-    <string name="btn_read">အစမ်းဖတ်</string>
+    <string name="btn_read">ဖတ်ရှုမည်</string>
     <string name="btn_download">ဒေါင်းလုဒ်</string>
     <string name="btn_retry">ပြန်လည်ကြိုးစားမည်</string>
     <string name="loading_books">စာအုပ်များ ခေါ်ယူနေပါသည်…</string>

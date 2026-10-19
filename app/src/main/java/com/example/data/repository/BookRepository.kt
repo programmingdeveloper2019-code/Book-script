@@ -69,11 +69,22 @@ class BookRepository(
         query: String = "",
         sortOrder: String = "recent"
     ): Flow<List<Book>> {
+        val trimmed = query.trim()
+        val tokens = if (trimmed.isNotBlank()) {
+            trimmed.split(Regex("\\s+")).filter { it.isNotBlank() }
+        } else {
+            emptyList()
+        }
+        val t1 = tokens.getOrNull(0) ?: ""
+        val t2 = tokens.getOrNull(1) ?: ""
+
         return combine(
             bookDao.getFilteredBooks(
                 genre = genre,
                 category = category,
-                query = query,
+                query = trimmed,
+                token1 = t1,
+                token2 = t2,
                 sortOrder = sortOrder
             ),
             bookDao.getAllFavorites()
@@ -109,7 +120,7 @@ class BookRepository(
         category: String = "ALL",
         query: String = "",
         page: Int = 1,
-        limit: Int = 20
+        limit: Int = 60
     ): Result<BooksResponseDto> = withContext(Dispatchers.IO) {
         try {
             val response = apiService.getBooks(

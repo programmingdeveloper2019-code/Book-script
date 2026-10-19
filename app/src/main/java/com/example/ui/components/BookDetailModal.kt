@@ -1,13 +1,13 @@
 package com.example.ui.components
 
 import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,23 +16,26 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.MenuBook
-import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.outlined.BookmarkBorder
-import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -44,11 +47,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Book
@@ -58,9 +64,47 @@ import com.example.ui.theme.DarkBackground
 import com.example.ui.theme.DarkCardBorder
 import com.example.ui.theme.DarkSurface
 import com.example.ui.theme.DarkSurfaceVariant
+import com.example.ui.theme.JacketBrown
+import com.example.ui.theme.JacketBurgundy
+import com.example.ui.theme.JacketCharcoal
+import com.example.ui.theme.JacketGreen
+import com.example.ui.theme.JacketNavy
+import com.example.ui.theme.JacketPurple
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
+
+private val JacketColors = listOf(
+    JacketNavy,
+    JacketGreen,
+    JacketBrown,
+    JacketPurple,
+    JacketCharcoal,
+    JacketBurgundy
+)
+
+@Composable
+fun BookDetailView(
+    book: Book,
+    readingProgress: ReadingProgress? = null,
+    onDismiss: () -> Unit,
+    onReadClick: (Book) -> Unit,
+    onDownloadClick: (Book) -> Unit,
+    onToggleFavorite: (Book) -> Unit,
+    onSearchByAuthor: ((String) -> Unit)? = null,
+    onResetProgress: (() -> Unit)? = null
+) {
+    BookDetailModal(
+        book = book,
+        readingProgress = readingProgress,
+        onDismiss = onDismiss,
+        onReadClick = onReadClick,
+        onDownloadClick = onDownloadClick,
+        onToggleFavorite = onToggleFavorite,
+        onSearchByAuthor = onSearchByAuthor,
+        onResetProgress = onResetProgress
+    )
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -76,35 +120,73 @@ fun BookDetailModal(
 ) {
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val jacketBg = JacketColors[book.jacketIndex.coerceIn(0, JacketColors.lastIndex)]
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = DarkSurface,
         dragHandle = null,
-        modifier = Modifier.testTag("book_detail_bottom_sheet")
+        modifier = Modifier
+            .testTag("book_detail_view")
+            .testTag("book_detail_bottom_sheet")
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(20.dp)
+                .padding(horizontal = 20.dp, vertical = 16.dp)
                 .verticalScroll(rememberScrollState())
         ) {
-            // Header with Close
+            // Drag handle pill
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(width = 38.dp, height = 4.dp)
+                        .clip(CircleShape)
+                        .background(TextMuted.copy(alpha = 0.4f))
+                )
+            }
+
+            // Header Row with Title and Close Button
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "စာအုပ် အသေးစိတ်",
-                    color = AmberPrimary,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(CircleShape)
+                            .background(AmberPrimary.copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AutoStories,
+                            contentDescription = null,
+                            tint = AmberPrimary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "စာအုပ် အသေးစိတ်",
+                        color = AmberPrimary,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
                 IconButton(
                     onClick = onDismiss,
-                    modifier = Modifier.size(32.dp)
+                    modifier = Modifier
+                        .size(32.dp)
+                        .testTag("detail_close_btn")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
@@ -114,59 +196,160 @@ fun BookDetailModal(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
-            // Book Card Highlight
+            // Hero Book Overview Card (Jacket + Clean Title + Genre + Meta)
+            Card(
+                colors = CardDefaults.cardColors(containerColor = DarkSurfaceVariant),
+                shape = RoundedCornerShape(14.dp),
+                border = CardDefaults.outlinedCardBorder().copy(
+                    brush = SolidColor(DarkCardBorder)
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        // Book Jacket Cover Thumbnail
+                        Box(
+                            modifier = Modifier
+                                .width(90.dp)
+                                .height(125.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(jacketBg)
+                                .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                                .padding(6.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(113.dp)
+                                    .border(0.7.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(5.dp))
+                                    .padding(6.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = book.cleanTitle,
+                                        color = Color.White,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 3,
+                                        overflow = TextOverflow.Ellipsis,
+                                        lineHeight = 13.sp
+                                    )
+                                    Text(
+                                        text = book.displayAuthor,
+                                        color = Color.White.copy(alpha = 0.8f),
+                                        fontSize = 8.5.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+
+                        // Title & High-level details
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = book.cleanTitle,
+                                color = TextPrimary,
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Bold,
+                                lineHeight = 23.sp,
+                                modifier = Modifier.testTag("detail_title")
+                            )
+
+                            // Meta chips
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                MetaChip(label = book.genre, color = AmberPrimary)
+                                MetaChip(label = "PDF", color = TextSecondary)
+                                MetaChip(label = book.formattedSize, color = TextMuted)
+                            }
+
+                            MetaChip(label = book.category, color = AmberPrimary.copy(alpha = 0.85f))
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Author & Publication Date Cards (Displayed prominently)
             Card(
                 colors = CardDefaults.cardColors(containerColor = DarkSurfaceVariant),
                 shape = RoundedCornerShape(12.dp),
-                border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(DarkCardBorder)),
+                border = CardDefaults.outlinedCardBorder().copy(brush = SolidColor(DarkCardBorder)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp)
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text(
-                        text = book.cleanTitle,
-                        color = TextPrimary,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        lineHeight = 24.sp
-                    )
-
-                    // Author Information
+                    // Author Information Row
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 6.dp),
+                            .testTag("detail_author"),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "✍️ စာရေးဆရာ: ",
-                            color = AmberPrimary,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = book.displayAuthor,
-                            color = TextPrimary,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium
-                        )
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(AmberPrimary.copy(alpha = 0.12f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = null,
+                                tint = AmberPrimary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(10.dp))
+
+                        Column {
+                            Text(
+                                text = "စာရေးဆရာ (Author)",
+                                color = TextSecondary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Normal
+                            )
+                            Text(
+                                text = book.displayAuthor,
+                                color = TextPrimary,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
 
+                    // Author Quick-Search Chip (if author is known)
                     if (book.author.isNotBlank() && onSearchByAuthor != null) {
-                        Spacer(modifier = Modifier.height(8.dp))
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(AmberPrimary.copy(alpha = 0.15f))
-                                .border(0.8.dp, AmberPrimary.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                                .background(AmberPrimary.copy(alpha = 0.12f))
+                                .border(0.8.dp, AmberPrimary.copy(alpha = 0.45f), RoundedCornerShape(6.dp))
                                 .clickable {
                                     onDismiss()
                                     onSearchByAuthor(book.author)
                                 }
-                                .padding(horizontal = 10.dp, vertical = 5.dp)
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                                .testTag("search_by_author_btn")
                         ) {
                             Text(
                                 text = "🔍 «${book.author}» ၏ အခြားစာအုပ်များ ရှာဖွေမည်",
@@ -177,41 +360,127 @@ fun BookDetailModal(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    HorizontalDivider(
+                        color = DarkCardBorder,
+                        thickness = 0.8.dp,
+                        modifier = Modifier.padding(vertical = 2.dp)
+                    )
 
-                    // Meta Tags
+                    // Publication Date Information Row
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("detail_publication_date"),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        MetaChip(label = book.genre, color = AmberPrimary)
-                        MetaChip(label = book.category, color = AmberPrimary.copy(alpha = 0.8f))
-                        MetaChip(label = "PDF", color = TextSecondary)
-                        MetaChip(label = book.formattedSize, color = TextMuted)
-                    }
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(AmberPrimary.copy(alpha = 0.12f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CalendarToday,
+                                contentDescription = null,
+                                tint = AmberPrimary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
 
-                    if (book.rawFilename != null && book.rawFilename.isNotBlank()) {
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Text(
-                            text = "ဖိုင်အမည်: ${book.rawFilename}",
-                            color = TextMuted,
-                            fontSize = 11.sp,
-                            maxLines = 1
-                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+
+                        Column {
+                            Text(
+                                text = "ထုတ်ဝေသည့် ခုနှစ် (Publication Date)",
+                                color = TextSecondary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Normal
+                            )
+                            Text(
+                                text = book.displayPublicationDate,
+                                color = TextPrimary,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
                 }
             }
 
-            // Reading Progress Card (If already started reading)
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Book Synopsis Section
+            Card(
+                colors = CardDefaults.cardColors(containerColor = DarkSurfaceVariant),
+                shape = RoundedCornerShape(12.dp),
+                border = CardDefaults.outlinedCardBorder().copy(
+                    brush = SolidColor(AmberPrimary.copy(alpha = 0.35f))
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("detail_synopsis_card")
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AutoStories,
+                            contentDescription = null,
+                            tint = AmberPrimary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "စာအုပ် အကျဉ်းချုပ် (Synopsis)",
+                            color = AmberPrimary,
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = book.displaySynopsis,
+                        color = TextPrimary.copy(alpha = 0.95f),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Normal,
+                        lineHeight = 21.sp,
+                        modifier = Modifier.testTag("detail_synopsis")
+                    )
+                }
+            }
+
+            // Filename specification if present
+            if (book.rawFilename != null && book.rawFilename.isNotBlank()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "ဖိုင်အမည်: ${book.rawFilename}",
+                    color = TextMuted,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
+            }
+
+            // Reading Progress Card (If previously read)
             if (readingProgress != null) {
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
                 Card(
                     colors = CardDefaults.cardColors(containerColor = DarkSurfaceVariant),
                     shape = RoundedCornerShape(12.dp),
                     border = CardDefaults.outlinedCardBorder().copy(
-                        brush = androidx.compose.ui.graphics.SolidColor(AmberPrimary.copy(alpha = 0.5f))
+                        brush = SolidColor(AmberPrimary.copy(alpha = 0.5f))
                     ),
-                    modifier = Modifier.fillMaxWidth().testTag("detail_reading_progress_card")
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("detail_reading_progress_card")
                 ) {
                     Column(modifier = Modifier.padding(14.dp)) {
                         Row(
@@ -286,107 +555,103 @@ fun BookDetailModal(
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
-            // Primary Actions: Read Online & Download
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            // Primary Direct Read Action
+            Button(
+                onClick = {
+                    onDismiss()
+                    onReadClick(book)
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .testTag("detail_read_btn"),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = AmberPrimary,
+                    contentColor = Color.Black
+                ),
+                shape = RoundedCornerShape(10.dp)
             ) {
-                Button(
-                    onClick = {
-                        onDismiss()
-                        onReadClick(book)
-                    },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp)
-                        .testTag("detail_read_btn"),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = AmberPrimary,
-                        contentColor = Color.Black
-                    ),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.MenuBook,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = if (readingProgress != null) "ဆက်လက်ဖတ်ရှုမည်" else "အစမ်းဖတ်ရှုမည်",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp
-                    )
-                }
-
-                Button(
-                    onClick = { onDownloadClick(book) },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp)
-                        .testTag("detail_download_btn"),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = DarkSurfaceVariant,
-                        contentColor = TextPrimary
-                    ),
-                    shape = RoundedCornerShape(10.dp),
-                    border = ButtonDefaults.outlinedButtonBorder.copy(
-                        brush = androidx.compose.ui.graphics.SolidColor(DarkCardBorder)
-                    )
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Download,
-                        contentDescription = null,
-                        tint = AmberPrimary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "ဒေါင်းလုဒ်ရယူမည်",
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 13.sp
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Default.MenuBook,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = if (readingProgress != null) "ဆက်လက်ဖတ်ရှုမည် (${readingProgress.displayPageText})" else "တိုက်ရိုက် ဖတ်ရှုမည် (ဒေါင်းလုဒ်လုပ်ရန်မလိုပါ)",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.5.sp
+                )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-            // Secondary Actions: Favorite & Share & Web link
+            // Secondary Actions: Favorite, Optional Download & Share
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 // Favorite Toggle
                 OutlinedButton(
                     onClick = { onToggleFavorite(book) },
                     modifier = Modifier
                         .weight(1f)
-                        .height(44.dp)
+                        .height(42.dp)
                         .testTag("detail_favorite_btn"),
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.outlinedButtonColors(
                         containerColor = if (book.isFavorite) AmberPrimary.copy(alpha = 0.18f) else DarkSurfaceVariant
                     ),
                     border = ButtonDefaults.outlinedButtonBorder.copy(
-                        brush = androidx.compose.ui.graphics.SolidColor(
+                        brush = SolidColor(
                             if (book.isFavorite) AmberPrimary else DarkCardBorder
                         )
-                    )
+                    ),
+                    contentPadding = PaddingValues(horizontal = 6.dp)
                 ) {
                     Icon(
                         imageVector = if (book.isFavorite) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
                         contentDescription = null,
                         tint = if (book.isFavorite) AmberPrimary else TextSecondary,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(15.dp)
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = if (book.isFavorite) "မှတ်သားထားပြီး (ဖယ်မည်)" else "သိမ်းဆည်းမည်",
+                        text = if (book.isFavorite) "သိမ်းပြီး" else "မှတ်မည်",
                         color = if (book.isFavorite) AmberPrimary else TextPrimary,
                         fontSize = 11.sp,
                         fontWeight = if (book.isFavorite) FontWeight.Bold else FontWeight.Medium
+                    )
+                }
+
+                // Optional Download Button
+                OutlinedButton(
+                    onClick = { onDownloadClick(book) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(42.dp)
+                        .testTag("detail_download_btn"),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(containerColor = DarkSurfaceVariant),
+                    border = ButtonDefaults.outlinedButtonBorder.copy(
+                        brush = SolidColor(DarkCardBorder)
+                    ),
+                    contentPadding = PaddingValues(horizontal = 6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Download,
+                        contentDescription = null,
+                        tint = AmberPrimary,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "ဒေါင်းလုဒ်",
+                        color = TextPrimary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
                     )
                 }
 
@@ -401,57 +666,35 @@ fun BookDetailModal(
                             )
                             putExtra(
                                 Intent.EXTRA_TEXT,
-                                "«${book.cleanTitle}» (${book.category}) စာအုပ်ကို Yatal Library တွင် အခမဲ့ ဖတ်ရှုဒေါင်းလုဒ် ရယူပါ:\nhttps://library.yatal.tech/?book=${book.id}"
+                                "«${book.cleanTitle}» (${book.category})\nစာရေးဆရာ: ${book.displayAuthor}\nထုတ်ဝေသည့် ခုနှစ်: ${book.displayPublicationDate}\nအကျဉ်းချုပ်: ${book.displaySynopsis}\nအရွယ်အစား: ${book.formattedSize}\n(Yatal Library အက်ပ်တွင် တိုက်ရိုက် ဖတ်ရှုနိုင်ပါသည်)"
                             )
                         }
-                        context.startActivity(Intent.createChooser(shareIntent, "စာအုပ် ဝေမျှရန်"))
+                        context.startActivity(Intent.createChooser(shareIntent, "စာအုပ် အချက်အလက် ဝေမျှရန်"))
                     },
                     modifier = Modifier
                         .weight(1f)
-                        .height(44.dp)
+                        .height(42.dp)
                         .testTag("detail_share_btn"),
-                    shape = RoundedCornerShape(10.dp)
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(containerColor = DarkSurfaceVariant),
+                    border = ButtonDefaults.outlinedButtonBorder.copy(
+                        brush = SolidColor(DarkCardBorder)
+                    ),
+                    contentPadding = PaddingValues(horizontal = 6.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Share,
                         contentDescription = null,
                         tint = AmberPrimary,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(15.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
                         text = "ဝေမျှမည်",
                         color = TextPrimary,
-                        fontSize = 12.sp
+                        fontSize = 11.sp
                     )
                 }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Open in browser
-            OutlinedButton(
-                onClick = {
-                    val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://library.yatal.tech/?book=${book.id}"))
-                    context.startActivity(browserIntent)
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(42.dp),
-                shape = RoundedCornerShape(10.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.Language,
-                    contentDescription = null,
-                    tint = TextSecondary,
-                    modifier = Modifier.size(15.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = "Yatal Website တွင် ဖွင့်ဖတ်မည်",
-                    color = TextSecondary,
-                    fontSize = 12.sp
-                )
             }
 
             Spacer(modifier = Modifier.height(20.dp))

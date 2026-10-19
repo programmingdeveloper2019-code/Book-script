@@ -38,27 +38,18 @@ object DownloadHelper {
                     Toast.LENGTH_LONG
                 ).show()
             } else {
-                // Fallback to browser download
-                val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(downloadUrl))
-                context.startActivity(browserIntent)
-            }
-        } catch (e: Exception) {
-            // Fallback to browser intent if permission or download manager issue
-            try {
-                val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://library.yatal.tech/api/download/${book.id}"))
-                context.startActivity(browserIntent)
                 Toast.makeText(
                     context,
-                    "ဒေါင်းလုဒ် စတင်ရန် Browser သို့ လွှဲပြောင်းပေးထားပါသည်",
-                    Toast.LENGTH_SHORT
-                ).show()
-            } catch (ex: Exception) {
-                Toast.makeText(
-                    context,
-                    "ဒေါင်းလုဒ် ရယူရာတွင် ချို့ယွင်းချက်ရှိပါသည်: ${e.localizedMessage}",
+                    "ဒေါင်းလုဒ် မန်နေဂျာ မတွေ့ပါ၊ စာအုပ်ကို အက်ပ်ထဲတွင် တိုက်ရိုက် ဖတ်ရှုနိုင်ပါသည်",
                     Toast.LENGTH_LONG
                 ).show()
             }
+        } catch (e: Exception) {
+            Toast.makeText(
+                context,
+                "ဒေါင်းလုဒ် ရယူရာတွင် ချို့ယွင်းချက်ရှိပါသည်: ${e.localizedMessage} (အက်ပ်ထဲတွင် တိုက်ရိုက် ဖတ်ရှုနိုင်ပါသည်)",
+                Toast.LENGTH_LONG
+            ).show()
         }
     }
 }

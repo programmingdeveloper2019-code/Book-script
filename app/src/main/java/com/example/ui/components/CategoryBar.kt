@@ -39,6 +39,7 @@ fun CategoryBar(
     categories: List<CategoryDto>,
     selectedCategory: String,
     onSelectCategory: (String) -> Unit,
+    totalCount: Int = 0,
     modifier: Modifier = Modifier
 ) {
     val numberFormat = NumberFormat.getNumberInstance(Locale.US)
@@ -53,9 +54,10 @@ fun CategoryBar(
         // "ALL" (အားလုံး) Chip
         item {
             val isSelected = selectedCategory == "ALL"
+            val displayTotal = if (totalCount > 0) totalCount else categories.sumOf { it.count }
             CategoryChipItem(
                 label = "အားလုံး",
-                count = null,
+                count = if (displayTotal > 0) numberFormat.format(displayTotal) else null,
                 isSelected = isSelected,
                 onClick = { onSelectCategory("ALL") },
                 testTag = "category_chip_all"

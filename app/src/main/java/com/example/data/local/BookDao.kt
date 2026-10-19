@@ -28,7 +28,8 @@ interface BookDao {
     @Query("""
         SELECT * FROM cached_books 
         WHERE genre = :genre 
-           OR (:genre = 'Literature' AND (genre = 'Literature' OR genre = 'စာပေနှင့် ရသ'))
+           OR (:genre = 'Fiction' AND (genre = 'Fiction' OR genre = 'Literature' OR genre = 'ဝတ္ထု / စာပေ' OR category LIKE '%ဝတ္ထု%'))
+           OR (:genre = 'Literature' AND (genre = 'Literature' OR genre = 'Fiction' OR genre = 'စာပေနှင့် ရသ'))
            OR (:genre = 'History' AND (genre = 'History' OR genre = 'သုတနှင့် သမိုင်း'))
            OR (:genre = 'Education' AND (genre = 'Education' OR genre = 'ဘာသာစကား' OR genre = 'ပညာရေးနှင့် သင်ကြားရေး'))
         ORDER BY cachedAt DESC
@@ -39,11 +40,12 @@ interface BookDao {
         SELECT * FROM cached_books
         WHERE (:genre = 'ALL' 
             OR genre = :genre 
-            OR (:genre = 'Literature' AND (genre = 'Literature' OR genre = 'စာပေနှင့် ရသ'))
-            OR (:genre = 'History' AND (genre = 'History' OR genre = 'သုတနှင့် သမိုင်း'))
+            OR (:genre = 'Fiction' AND (genre = 'Fiction' OR genre = 'Literature' OR genre = 'ဝတ္ထု / စာပေ' OR category LIKE '%ဝတ္ထု%'))
+            OR (:genre = 'Literature' AND (genre = 'Literature' OR genre = 'Fiction' OR genre = 'စာပေနှင့် ရသ'))
+            OR (:genre = 'History' AND (genre = 'History' OR genre = 'သုတနှင့် သမိုင်း' OR genre = 'သမိုင်းနှင့် ရှေးဟောင်း'))
             OR (:genre = 'Education' AND (genre = 'Education' OR genre = 'ဘာသာစကား' OR genre = 'ပညာရေးနှင့် သင်ကြားရေး'))
             OR (:genre = 'Technology' AND (genre = 'Technology' OR genre = 'tech' OR genre = 'နည်းပညာနှင့် IT'))
-            OR (:genre = 'Business' AND (genre = 'Business' OR genre = 'စီးပွားရေးနှင့် စိတ်ပညာ'))
+            OR (:genre = 'Business' AND (genre = 'Business' OR genre = 'စီးပွားရေးနှင့် စိတ်ပညာ' OR genre = 'စီးပွားရေးနှင့် စီမံခန့်ခွဲမှု'))
             OR (:genre = 'Science' AND (genre = 'Science' OR genre = 'သိပ္ပံနှင့် သုတ'))
             OR (:genre = 'Comics & Art' AND (genre = 'Comics & Art' OR genre = 'comics' OR genre = 'ရုပ်ပြနှင့် အနုပညာ'))
             OR (:genre = 'General' AND (genre = 'General' OR genre = 'general' OR genre = 'အထူးနှင့် အထွေထွေ'))
@@ -55,6 +57,10 @@ interface BookDao {
             OR author LIKE '%' || :query || '%' 
             OR category LIKE '%' || :query || '%'
             OR rawFilename LIKE '%' || :query || '%'
+            OR (:token1 != '' AND (
+                (title LIKE '%' || :token1 || '%' OR author LIKE '%' || :token1 || '%')
+                AND (:token2 = '' OR title LIKE '%' || :token2 || '%' OR author LIKE '%' || :token2 || '%')
+            ))
         )
         ORDER BY 
             CASE WHEN :sortOrder = 'title_asc' THEN title END ASC,
@@ -66,6 +72,8 @@ interface BookDao {
         genre: String = "ALL",
         category: String = "ALL",
         query: String = "",
+        token1: String = "",
+        token2: String = "",
         sortOrder: String = "recent"
     ): Flow<List<BookEntity>>
 

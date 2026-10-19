@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,6 +23,8 @@ import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.OpenInNew
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -31,15 +34,20 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Book
@@ -70,6 +78,7 @@ private val JacketColors = listOf(
 fun BookCard(
     book: Book,
     readingProgress: ReadingProgress? = null,
+    highlightQuery: String = "",
     onBookClick: (Book) -> Unit,
     onReadClick: (Book) -> Unit,
     onDownloadClick: (Book) -> Unit,
@@ -230,9 +239,28 @@ fun BookCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // External Book Title (Clean and full)
+            val highlightedTitle = remember(book.cleanTitle, highlightQuery) {
+                buildHighlightedAnnotatedString(
+                    text = book.cleanTitle,
+                    query = highlightQuery,
+                    highlightColor = AmberPrimary,
+                    highlightBgColor = AmberPrimary.copy(alpha = 0.25f)
+                )
+            }
+
+            val authorDisplay = if (book.author.isNotBlank()) book.author else "အမည်မသိ စာရေးဆရာ"
+            val highlightedAuthor = remember(authorDisplay, highlightQuery) {
+                buildHighlightedAnnotatedString(
+                    text = authorDisplay,
+                    query = highlightQuery,
+                    highlightColor = AmberPrimary,
+                    highlightBgColor = AmberPrimary.copy(alpha = 0.25f)
+                )
+            }
+
+            // External Book Title (Clean and full with real-time query match highlighting)
             Text(
-                text = book.cleanTitle,
+                text = highlightedTitle,
                 color = TextPrimary,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
@@ -258,7 +286,7 @@ fun BookCard(
                 )
                 Spacer(modifier = Modifier.width(3.dp))
                 Text(
-                    text = if (book.author.isNotBlank()) book.author else "အမည်မသိ စာရေးဆရာ",
+                    text = highlightedAuthor,
                     color = if (book.author.isNotBlank()) AmberPrimary.copy(alpha = 0.9f) else TextMuted,
                     fontSize = 10.5.sp,
                     fontWeight = if (book.author.isNotBlank()) FontWeight.Medium else FontWeight.Normal,
@@ -324,60 +352,54 @@ fun BookCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Action Buttons (Download, Read, Favorite)
+            // Action Buttons: Direct Read (Primary), Optional Download, Favorite
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                // Download Button
-                OutlinedButton(
-                    onClick = { onDownloadClick(book) },
+                // Primary Direct Read Action (No download required to read)
+                Button(
+                    onClick = { onReadClick(book) },
                     modifier = Modifier
                         .weight(1f)
                         .height(34.dp)
-                        .testTag("download_btn_${book.id}"),
+                        .testTag("read_btn_${book.id}"),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AmberPrimary,
+                        contentColor = Color.Black
+                    ),
                     shape = RoundedCornerShape(8.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 4.dp)
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Download,
-                        contentDescription = "ဒေါင်းလုဒ်",
-                        tint = AmberPrimary,
+                        imageVector = Icons.Default.MenuBook,
+                        contentDescription = "ဖတ်ရှုမည်",
                         modifier = Modifier.size(14.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = "ဒေါင်းလုဒ်",
+                        text = if (readingProgress != null) "ဆက်ဖတ်မည်" else "ဖတ်ရှုမည်",
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = TextPrimary
+                        fontWeight = FontWeight.Bold
                     )
                 }
 
-                // In-App Read Button (Shows active highlight when book is in progress)
+                // Optional Download Icon (For keeping local copy)
                 IconButton(
-                    onClick = { onReadClick(book) },
+                    onClick = { onDownloadClick(book) },
                     modifier = Modifier
                         .size(34.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(
-                            if (readingProgress != null) AmberPrimary.copy(alpha = 0.22f)
-                            else Color.White.copy(alpha = 0.05f)
-                        )
-                        .border(
-                            1.dp,
-                            if (readingProgress != null) AmberPrimary.copy(alpha = 0.7f)
-                            else Color.Transparent,
-                            RoundedCornerShape(8.dp)
-                        )
-                        .testTag("read_btn_${book.id}")
+                        .background(Color.White.copy(alpha = 0.05f))
+                        .border(1.dp, DarkCardBorder, RoundedCornerShape(8.dp))
+                        .testTag("download_btn_${book.id}")
                 ) {
                     Icon(
-                        imageVector = Icons.Default.MenuBook,
-                        contentDescription = if (readingProgress != null) "ဆက်လက်ဖတ်ရှုရန်" else "ဖတ်ရှုရန်",
-                        tint = AmberPrimary,
-                        modifier = Modifier.size(16.dp)
+                        imageVector = Icons.Default.Download,
+                        contentDescription = "ဒေါင်းလုဒ် သိမ်းဆည်းရန်",
+                        tint = TextSecondary,
+                        modifier = Modifier.size(15.dp)
                     )
                 }
 
@@ -394,7 +416,7 @@ fun BookCard(
                         .border(
                             1.dp,
                             if (book.isFavorite) AmberPrimary.copy(alpha = 0.6f)
-                            else Color.Transparent,
+                            else DarkCardBorder,
                             RoundedCornerShape(8.dp)
                         )
                         .testTag("fav_btn_${book.id}")
@@ -403,10 +425,50 @@ fun BookCard(
                         imageVector = if (book.isFavorite) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
                         contentDescription = if (book.isFavorite) "မှတ်သားထားသည် (ဖယ်ရှားရန်)" else "စာအုပ် သိမ်းဆည်းရန်",
                         tint = if (book.isFavorite) AmberPrimary else TextMuted,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(15.dp)
                     )
                 }
             }
         }
     }
 }
+
+/**
+ * Highlights matching query terms in text using bold styling and subtle amber background.
+ */
+fun buildHighlightedAnnotatedString(
+    text: String,
+    query: String,
+    highlightColor: Color = AmberPrimary,
+    highlightBgColor: Color = AmberPrimary.copy(alpha = 0.25f)
+): AnnotatedString {
+    if (query.isBlank() || text.isBlank()) {
+        return AnnotatedString(text)
+    }
+
+    val tokens = query.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+    if (tokens.isEmpty()) {
+        return AnnotatedString(text)
+    }
+
+    val builder = AnnotatedString.Builder(text)
+    for (token in tokens) {
+        var startIndex = 0
+        while (startIndex < text.length) {
+            val found = text.indexOf(token, startIndex, ignoreCase = true)
+            if (found == -1) break
+            builder.addStyle(
+                SpanStyle(
+                    color = highlightColor,
+                    fontWeight = FontWeight.Bold,
+                    background = highlightBgColor
+                ),
+                found,
+                found + token.length
+            )
+            startIndex = found + token.length
+        }
+    }
+    return builder.toAnnotatedString()
+}
+

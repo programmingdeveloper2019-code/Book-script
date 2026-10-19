@@ -126,7 +126,8 @@ fun CategoriesView(
                                 val isSelected = (genre == BookGenre.ALL && (selectedGenre == "ALL" || selectedGenre == BookGenre.ALL.displayName)) ||
                                         (selectedGenre == genre.displayName)
                                 val count = if (genre == BookGenre.ALL) {
-                                    totalCachedCount
+                                    val totalInCategories = categories.sumOf { it.count }
+                                    if (totalInCategories > 0) totalInCategories else (genreCounts[BookGenre.ALL.displayName] ?: totalCachedCount)
                                 } else {
                                     genreCounts[genre.displayName] ?: 0
                                 }

@@ -10,6 +10,8 @@ import com.example.data.model.BookGenre
 import com.example.data.model.CategoryDto
 import com.example.data.model.ReadingProgress
 import com.example.data.repository.BookRepository
+import com.example.data.model.calculateGenreCounts
+import com.example.data.model.getCategoriesForGenre
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -77,6 +79,8 @@ data class LibraryUiState(
     val searchQuery: String = "",
     val searchScope: SearchFilterScope = SearchFilterScope.ALL,
     val suggestedAuthors: List<String> = emptyList(),
+    val titleSuggestions: List<String> = emptyList(),
+    val searchMatchCount: Int = 0,
     val sortOrder: SortOption = SortOption.RECENT,
     val genreCounts: Map<String, Int> = emptyMap(),
     val categoryCounts: Map<String, Int> = emptyMap(),
@@ -130,32 +134,43 @@ class BookViewModel(application: Application) : AndroidViewModel(application) {
                     query = params.query,
                     sortOrder = params.sort.id
                 ).map { rawList: List<Book> ->
-                    if (params.query.isBlank() || params.scope == SearchFilterScope.ALL) {
-                        rawList
-                    } else {
-                        val q = params.query.trim().lowercase()
-                        rawList.filter { book ->
-                            when (params.scope) {
-                                SearchFilterScope.TITLE -> {
-                                    book.cleanTitle.lowercase().contains(q) ||
-                                            book.title.lowercase().contains(q) ||
-                                            (book.rawFilename?.lowercase()?.contains(q) == true)
-                                }
-                                SearchFilterScope.AUTHOR -> {
-                                    book.author.lowercase().contains(q) ||
-                                            (book.author.isBlank() && book.title.lowercase().contains(q))
-                                }
-                                SearchFilterScope.ALL -> true
-                            }
-                        }
-                    }
+                    rankAndFilterBooks(
+                        books = rawList,
+                        query = params.query,
+                        scope = params.scope,
+                        sortOrder = params.sort
+                    )
                 }
             }.collectLatest { filteredList: List<Book> ->
+                val q = _searchQuery.value.trim()
+                val suggestions = if (q.isNotBlank()) {
+                    filteredList.map { it.cleanTitle }.distinct().take(6)
+                } else {
+                    emptyList()
+                }
                 _uiState.update { state ->
+                    val resolvedTotal = when {
+                        q.isNotBlank() -> filteredList.size
+                        state.selectedCategory != "ALL" -> {
+                            val catCount = state.categories.find { it.name == state.selectedCategory }?.count ?: 0
+                            if (catCount > 0) catCount else (if (state.totalBooksCount > 0) state.totalBooksCount else filteredList.size)
+                        }
+                        state.selectedGenre != "ALL" -> {
+                            val gCount = state.genreCounts[state.selectedGenre] ?: 0
+                            if (gCount > 0) gCount else (if (state.totalBooksCount > 0) state.totalBooksCount else filteredList.size)
+                        }
+                        else -> {
+                            val allCatTotal = state.categories.sumOf { it.count }
+                            if (allCatTotal > 0) allCatTotal else (if (state.totalBooksCount > 0) state.totalBooksCount else filteredList.size)
+                        }
+                    }
+
                     state.copy(
                         books = filteredList,
-                        totalBooksCount = if (filteredList.isNotEmpty()) filteredList.size else state.totalBooksCount,
-                        isLoading = if (filteredList.isNotEmpty()) false else state.isLoading
+                        titleSuggestions = suggestions,
+                        searchMatchCount = filteredList.size,
+                        totalBooksCount = resolvedTotal,
+                        isLoading = false
                     )
                 }
             }
@@ -172,12 +187,14 @@ class BookViewModel(application: Application) : AndroidViewModel(application) {
         // 2. Observe Room DB Genre Stats
         viewModelScope.launch {
             repository.genreStats.collectLatest { stats ->
-                val countMap = mutableMapOf<String, Int>()
-                for (stat in stats) {
-                    val normalized = BookGenre.fromDisplayNameOrId(stat.genre).displayName
-                    countMap[normalized] = (countMap[normalized] ?: 0) + stat.count
+                if (_uiState.value.genreCounts.isEmpty()) {
+                    val countMap = mutableMapOf<String, Int>()
+                    for (stat in stats) {
+                        val normalized = BookGenre.fromDisplayNameOrId(stat.genre).displayName
+                        countMap[normalized] = (countMap[normalized] ?: 0) + stat.count
+                    }
+                    _uiState.update { it.copy(genreCounts = countMap) }
                 }
-                _uiState.update { it.copy(genreCounts = countMap) }
             }
         }
 
@@ -218,9 +235,16 @@ class BookViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.cachedCategories.collectLatest { cachedCats ->
                 if (cachedCats.isNotEmpty()) {
+                    val dtos = cachedCats.map { CategoryDto(name = it.name, count = it.count) }
+                    val genreTotals = calculateGenreCounts(dtos)
+                    val totalInLibrary = dtos.sumOf { it.count }
                     _uiState.update { state ->
                         state.copy(
-                            categories = cachedCats.map { CategoryDto(name = it.name, count = it.count) }
+                            categories = dtos,
+                            genreCounts = genreTotals,
+                            totalBooksCount = if (state.selectedCategory == "ALL" && state.selectedGenre == "ALL" && state.searchQuery.isBlank()) {
+                                if (totalInLibrary > 0) totalInLibrary else state.totalBooksCount
+                            } else state.totalBooksCount
                         )
                     }
                 }
@@ -257,11 +281,41 @@ class BookViewModel(application: Application) : AndroidViewModel(application) {
         val normalized = BookGenre.fromDisplayNameOrId(genreDisplayName)
         val targetGenre = if (normalized == BookGenre.ALL || genreDisplayName.equals("ALL", ignoreCase = true)) "ALL" else normalized.displayName
         _selectedGenre.value = targetGenre
+        _selectedCategory.value = "ALL"
+        _searchQuery.value = ""
+
+        val expectedTotal = if (targetGenre == "ALL") {
+            val totalInAll = _uiState.value.categories.sumOf { it.count }
+            if (totalInAll > 0) totalInAll else 10287
+        } else {
+            _uiState.value.genreCounts[targetGenre] ?: 0
+        }
+
         _uiState.update {
             it.copy(
                 selectedGenre = targetGenre,
-                activeTab = LibraryTab.BOOKS
+                selectedCategory = "ALL",
+                searchQuery = "",
+                currentPage = 1,
+                totalPages = 1,
+                isLoadingMore = false,
+                totalBooksCount = if (expectedTotal > 0) expectedTotal else it.totalBooksCount,
+                activeTab = LibraryTab.BOOKS,
+                isLoading = true
             )
+        }
+
+        // Fetch online books for matching categories in this genre
+        viewModelScope.launch {
+            if (targetGenre != "ALL") {
+                val matchingCats = getCategoriesForGenre(normalized, _uiState.value.categories)
+                for (catName in matchingCats.take(3)) {
+                    repository.fetchBooks(category = catName, page = 1, limit = 50)
+                }
+            } else {
+                repository.fetchBooks(category = "ALL", page = 1, limit = 60)
+            }
+            _uiState.update { it.copy(isLoading = false) }
         }
     }
 
@@ -271,17 +325,52 @@ class BookViewModel(application: Application) : AndroidViewModel(application) {
     fun selectCategory(category: String) {
         val targetCat = if (category == "ALL") "ALL" else category
         _selectedCategory.value = targetCat
+        _selectedGenre.value = "ALL"
+        _searchQuery.value = ""
+
+        val expectedTotal = if (targetCat == "ALL") {
+            val totalInAll = _uiState.value.categories.sumOf { it.count }
+            if (totalInAll > 0) totalInAll else 10287
+        } else {
+            _uiState.value.categories.find { it.name == targetCat }?.count ?: 0
+        }
+
         _uiState.update {
             it.copy(
                 selectedCategory = targetCat,
-                activeTab = LibraryTab.BOOKS
+                selectedGenre = "ALL",
+                searchQuery = "",
+                currentPage = 1,
+                totalPages = 1,
+                isLoadingMore = false,
+                totalBooksCount = if (expectedTotal > 0) expectedTotal else it.totalBooksCount,
+                activeTab = LibraryTab.BOOKS,
+                isLoading = true
             )
         }
 
-        // If specific category selected, also trigger online fetch to refresh Room DB for this category
-        if (targetCat != "ALL") {
-            viewModelScope.launch {
-                repository.fetchBooks(category = targetCat, page = 1)
+        // If specific category selected, trigger online fetch to refresh Room DB for this category
+        viewModelScope.launch {
+            val result = repository.fetchBooks(category = targetCat, page = 1, limit = 60)
+            if (result.isSuccess) {
+                val resp = result.getOrNull()
+                if (resp != null) {
+                    _uiState.update {
+                        it.copy(
+                            totalBooksCount = resp.total,
+                            totalPages = resp.totalPages,
+                            currentPage = 1,
+                            isLoading = false
+                        )
+                    }
+                    // If category has multiple pages, proactively fetch page 2 immediately so 120 books appear
+                    if (resp.totalPages > 1) {
+                        repository.fetchBooks(category = targetCat, page = 2, limit = 60)
+                        _uiState.update { it.copy(currentPage = 2) }
+                    }
+                }
+            } else {
+                _uiState.update { it.copy(isLoading = false) }
             }
         }
     }
@@ -339,11 +428,35 @@ class BookViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onSearchQueryChanged(newQuery: String) {
-        _uiState.update { it.copy(searchQuery = newQuery) }
+        val willSearch = newQuery.isNotBlank()
+        _uiState.update {
+            it.copy(
+                searchQuery = newQuery,
+                activeTab = if (willSearch && it.activeTab != LibraryTab.BOOKS) LibraryTab.BOOKS else it.activeTab
+            )
+        }
         searchDebounceJob?.cancel()
-        searchDebounceJob = viewModelScope.launch {
-            delay(100) // Fast 100ms debounce for responsive typing
-            _searchQuery.value = newQuery.trim()
+        if (newQuery.isBlank()) {
+            _searchQuery.value = ""
+        } else {
+            searchDebounceJob = viewModelScope.launch {
+                delay(60) // Ultra-fast 60ms debounce for instantaneous real-time typing response
+                _searchQuery.value = newQuery.trim()
+            }
+        }
+    }
+
+    fun selectTitleSuggestion(title: String) {
+        val trimmed = title.trim()
+        searchDebounceJob?.cancel()
+        _searchScope.value = SearchFilterScope.TITLE
+        _searchQuery.value = trimmed
+        _uiState.update {
+            it.copy(
+                searchQuery = trimmed,
+                searchScope = SearchFilterScope.TITLE,
+                activeTab = LibraryTab.BOOKS
+            )
         }
     }
 
@@ -351,7 +464,14 @@ class BookViewModel(application: Application) : AndroidViewModel(application) {
         searchDebounceJob?.cancel()
         _searchScope.value = SearchFilterScope.ALL
         _searchQuery.value = ""
-        _uiState.update { it.copy(searchQuery = "", searchScope = SearchFilterScope.ALL) }
+        _uiState.update {
+            it.copy(
+                searchQuery = "",
+                searchScope = SearchFilterScope.ALL,
+                titleSuggestions = emptyList(),
+                searchMatchCount = 0
+            )
+        }
     }
 
     fun setTab(tab: LibraryTab) {
@@ -490,18 +610,40 @@ class BookViewModel(application: Application) : AndroidViewModel(application) {
 
             // 1. Fetch categories
             val catResult = repository.fetchCategories()
-            if (catResult.isSuccess) {
-                val cats = catResult.getOrNull().orEmpty()
-                _uiState.update { it.copy(categories = cats) }
+            val cats = if (catResult.isSuccess) {
+                catResult.getOrNull().orEmpty()
+            } else {
+                _uiState.value.categories
+            }
+
+            val totalInAllCats = cats.sumOf { it.count }
+            val genreTotals = calculateGenreCounts(cats)
+
+            _uiState.update {
+                it.copy(
+                    categories = cats,
+                    genreCounts = genreTotals,
+                    totalBooksCount = if (totalInAllCats > 0) totalInAllCats else it.totalBooksCount
+                )
             }
 
             // 2. Fetch Quota
             val quota = repository.fetchQuota()
 
-            // 3. Fetch books from popular categories to populate Room database with variety of genres
-            val topCategories = listOf("ALL", "စာအုပ်အထွေထွေ", "English Books", "ကွန်ပျူတာနှင့် နည်းပညာ", "သုတ၊ ရသ", "Cambridge English Books")
+            // 3. Fetch books with generous limit (60)
+            val allResult = repository.fetchBooks(category = "ALL", page = 1, limit = 60)
+            val serverTotal = allResult.getOrNull()?.total ?: totalInAllCats
+            if (serverTotal > 0) {
+                _uiState.update { it.copy(totalBooksCount = serverTotal) }
+            }
+            if ((allResult.getOrNull()?.totalPages ?: 1) > 1) {
+                repository.fetchBooks(category = "ALL", page = 2, limit = 60)
+            }
+
+            // Fetch top categories to ensure Room has rich variety across genres
+            val topCategories = listOf("English Books", "Cambridge English Books", "ကွန်ပျူတာနှင့် နည်းပညာ", "စာအုပ်အထွေထွေ", "ပုညခင်", "ရုပ်ပြကာတွန်း")
             for (cat in topCategories) {
-                repository.fetchBooks(category = cat, page = 1, limit = 25)
+                repository.fetchBooks(category = cat, page = 1, limit = 40)
             }
 
             val timeFormat = SimpleDateFormat("hh:mm a", Locale.getDefault())
@@ -515,22 +657,178 @@ class BookViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Pull-to-refresh action: refreshes categories, active category/genre books, and quota
+     */
+    fun refreshBooks() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isRefreshing = true, error = null) }
+            try {
+                val activeCategory = _selectedCategory.value
+                val activeGenre = _selectedGenre.value
+                if (activeCategory != "ALL") {
+                    repository.fetchBooks(category = activeCategory, page = 1, limit = 50)
+                } else if (activeGenre != "ALL") {
+                    val matchingCats = getCategoriesForGenre(BookGenre.fromDisplayNameOrId(activeGenre), _uiState.value.categories)
+                    for (catName in matchingCats.take(3)) {
+                        repository.fetchBooks(category = catName, page = 1, limit = 50)
+                    }
+                }
+                syncAllFromWebsite()
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isRefreshing = false) }
+            }
+        }
+    }
+
     fun loadMoreBooks() {
         if (_uiState.value.isLoadingMore) return
+        val current = _uiState.value.currentPage
+        val total = _uiState.value.totalPages
+        if (total > 1 && current >= total) return // all pages loaded
+
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingMore = true) }
-            val nextPage = _uiState.value.currentPage + 1
+            val nextPage = current + 1
             val result = repository.fetchBooks(
                 category = _uiState.value.selectedCategory,
                 query = _uiState.value.searchQuery,
                 page = nextPage,
-                limit = 20
+                limit = 60
             )
             if (result.isSuccess) {
-                _uiState.update { it.copy(currentPage = nextPage, isLoadingMore = false) }
+                val resp = result.getOrNull()
+                _uiState.update {
+                    it.copy(
+                        currentPage = nextPage,
+                        totalPages = resp?.totalPages ?: it.totalPages,
+                        totalBooksCount = resp?.total ?: it.totalBooksCount,
+                        isLoadingMore = false
+                    )
+                }
             } else {
                 _uiState.update { it.copy(isLoadingMore = false) }
             }
         }
     }
+}
+
+/**
+ * High-performance real-time search ranking and filtering engine.
+ * Prioritizes book titles (cleanTitle / title) with exact match, prefix match,
+ * continuous substring match, and multi-token matching for instantaneous title discovery.
+ */
+fun rankAndFilterBooks(
+    books: List<Book>,
+    query: String,
+    scope: SearchFilterScope,
+    sortOrder: SortOption = SortOption.RECENT
+): List<Book> {
+    if (query.isBlank()) return books
+
+    val cleanQ = query.trim().lowercase()
+    val tokens = cleanQ.split(Regex("\\s+")).filter { it.isNotBlank() }
+
+    val scored = books.mapNotNull { book ->
+        val titleLower = book.title.lowercase()
+        val cleanTitleLower = book.cleanTitle.lowercase()
+        val authorLower = book.author.lowercase()
+        val categoryLower = book.category.lowercase()
+        val filenameLower = book.rawFilename?.lowercase() ?: ""
+
+        var score = 0
+
+        when (scope) {
+            SearchFilterScope.TITLE -> {
+                // Title-focused discovery
+                if (cleanTitleLower == cleanQ || titleLower == cleanQ) {
+                    score += 3000
+                } else if (cleanTitleLower.startsWith(cleanQ) || titleLower.startsWith(cleanQ)) {
+                    score += 1800
+                } else if (cleanTitleLower.contains(cleanQ) || titleLower.contains(cleanQ)) {
+                    score += 1000
+                }
+
+                val matchedTokens = tokens.count { token ->
+                    cleanTitleLower.contains(token) || titleLower.contains(token) || filenameLower.contains(token)
+                }
+                if (matchedTokens == tokens.size) {
+                    score += 600 + (matchedTokens * 50)
+                } else if (matchedTokens > 0) {
+                    score += (matchedTokens * 70)
+                }
+            }
+
+            SearchFilterScope.AUTHOR -> {
+                // Author-focused discovery
+                if (authorLower == cleanQ) {
+                    score += 3000
+                } else if (authorLower.startsWith(cleanQ)) {
+                    score += 1800
+                } else if (authorLower.contains(cleanQ)) {
+                    score += 1000
+                }
+
+                val matchedTokens = tokens.count { token ->
+                    authorLower.contains(token) || (authorLower.isBlank() && titleLower.contains(token))
+                }
+                if (matchedTokens == tokens.size) {
+                    score += 600
+                } else if (matchedTokens > 0) {
+                    score += (matchedTokens * 70)
+                }
+            }
+
+            SearchFilterScope.ALL -> {
+                // Multi-field search prioritizing title discovery
+                if (cleanTitleLower == cleanQ || titleLower == cleanQ) {
+                    score += 3000
+                } else if (cleanTitleLower.startsWith(cleanQ) || titleLower.startsWith(cleanQ)) {
+                    score += 2000
+                } else if (cleanTitleLower.contains(cleanQ) || titleLower.contains(cleanQ)) {
+                    score += 1200
+                }
+
+                if (authorLower == cleanQ) {
+                    score += 1500
+                } else if (authorLower.startsWith(cleanQ)) {
+                    score += 900
+                } else if (authorLower.contains(cleanQ)) {
+                    score += 700
+                }
+
+                val matchedTitleTokens = tokens.count { cleanTitleLower.contains(it) || titleLower.contains(it) }
+                val matchedAuthorTokens = tokens.count { authorLower.contains(it) }
+                val matchedCategoryTokens = tokens.count { categoryLower.contains(it) }
+                val matchedFilenameTokens = tokens.count { filenameLower.contains(it) }
+
+                if (matchedTitleTokens == tokens.size) {
+                    score += 700 + (tokens.size * 30)
+                } else if (matchedAuthorTokens == tokens.size) {
+                    score += 500
+                } else if ((matchedTitleTokens + matchedAuthorTokens + matchedCategoryTokens) >= tokens.size) {
+                    score += 400
+                } else {
+                    val anyMatched = matchedTitleTokens + matchedAuthorTokens + matchedCategoryTokens + matchedFilenameTokens
+                    if (anyMatched > 0) {
+                        score += (anyMatched * 60)
+                    }
+                }
+            }
+        }
+
+        if (score > 0) Pair(book, score) else null
+    }
+
+    return scored
+        .sortedWith(
+            compareByDescending<Pair<Book, Int>> { it.second }
+                .thenBy {
+                    when (sortOrder) {
+                        SortOption.TITLE_ASC -> it.first.cleanTitle
+                        else -> ""
+                    }
+                }
+        )
+        .map { it.first }
 }

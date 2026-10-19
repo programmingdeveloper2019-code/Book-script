@@ -1,15 +1,7 @@
 package com.example.ui.components
 
-import android.annotation.SuppressLint
 import android.content.Intent
-import android.net.Uri
-import android.webkit.JavascriptInterface
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceError
-import android.webkit.WebResourceRequest
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
+import android.graphics.Bitmap
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -17,9 +9,12 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,21 +26,29 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkAdded
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.OpenInBrowser
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.FormatColorReset
+import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -70,18 +73,24 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -90,7 +99,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import com.example.data.model.Book
 import com.example.data.model.ReadingProgress
 import com.example.ui.theme.AmberPrimary
@@ -98,597 +106,525 @@ import com.example.ui.theme.DarkBackground
 import com.example.ui.theme.DarkCardBorder
 import com.example.ui.theme.DarkSurface
 import com.example.ui.theme.DarkSurfaceVariant
-import com.example.ui.theme.GreenOnline
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
-import kotlinx.coroutines.delay
-import java.net.URLEncoder
+import com.example.util.PdfCacheManager
+import com.example.util.PdfRendererHelper
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
+import java.io.File
+
+enum class ReaderTheme(val label: String) {
+    LIGHT("အလင်း"),
+    SEPIA("စက္ကူညို"),
+    DARK("အမှောင်")
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
-@SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun PdfReaderScreen(
     book: Book,
     savedProgress: ReadingProgress? = null,
     onClose: () -> Unit,
-    onDownloadClick: (Book) -> Unit,
+    onDownloadClick: (Book) -> Unit = {},
     onSaveProgress: (currentPage: Int, totalPages: Int, scrollRatio: Float, locationDescription: String) -> Unit
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
 
-    // State tracking reading position
-    var currentPage by remember { mutableIntStateOf(savedProgress?.currentPage ?: 1) }
-    var totalPages by remember { mutableIntStateOf(savedProgress?.totalPages?.coerceAtLeast(1) ?: 1) }
-    var scrollRatio by remember { mutableFloatStateOf(savedProgress?.scrollRatio ?: 0f) }
-    var locationDesc by remember { mutableStateOf(savedProgress?.lastLocationDescription.orEmpty()) }
-
-    var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    // Loading & Native Renderer State
+    var pdfFile by remember { mutableStateOf<File?>(null) }
+    var rendererHelper by remember { mutableStateOf<PdfRendererHelper?>(null) }
     var isLoading by remember { mutableStateOf(true) }
-    var loadProgress by remember { mutableFloatStateOf(0f) }
-    var hasError by remember { mutableStateOf(false) }
+    var downloadProgress by remember { mutableFloatStateOf(0f) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    // Dialog and notification states
+    // Reading session state
+    var totalPages by remember { mutableIntStateOf(savedProgress?.totalPages ?: 1) }
+    var currentPage by remember { mutableIntStateOf(savedProgress?.currentPage ?: 1) }
+    var locationDesc by remember { mutableStateOf(savedProgress?.lastLocationDescription.orEmpty()) }
+    var isBookmarked by remember { mutableStateOf(savedProgress != null) }
+
+    // UI View Settings
+    var showControls by remember { mutableStateOf(true) }
+    var readerTheme by remember { mutableStateOf(ReaderTheme.SEPIA) }
+    var zoomScale by remember { mutableFloatStateOf(1.0f) }
     var showJumpDialog by remember { mutableStateOf(false) }
-    var showBookmarkFeedback by remember { mutableStateOf(false) }
-    var showResumeBanner by remember {
-        mutableStateOf(savedProgress != null && (savedProgress.currentPage > 1 || savedProgress.scrollRatio > 0.05f))
+
+    // List State for continuous scroll
+    val initialIndex = ((savedProgress?.currentPage ?: 1) - 1).coerceAtLeast(0)
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
+
+    // Helper to persist reading progress
+    fun saveCurrentPosition() {
+        val count = totalPages.coerceAtLeast(1)
+        val ratio = if (count > 1) {
+            ((currentPage - 1).toFloat() / (count - 1).toFloat()).coerceIn(0f, 1f)
+        } else 0f
+
+        onSaveProgress(
+            currentPage,
+            count,
+            ratio,
+            if (locationDesc.isNotBlank()) locationDesc else "စာမျက်နှာ $currentPage / $count"
+        )
+        isBookmarked = true
     }
 
-    // Auto-save function
-    val saveCurrentPosition: () -> Unit = {
-        val desc = if (locationDesc.isNotBlank()) locationDesc else "စာမျက်နှာ $currentPage"
-        onSaveProgress(currentPage, totalPages, scrollRatio, desc)
+    // Automatically load or fetch the PDF
+    fun loadBookPdf() {
+        isLoading = true
+        errorMessage = null
+        downloadProgress = 0f
+
+        coroutineScope.launch {
+            try {
+                val file = PdfCacheManager.getOrFetchPdf(
+                    context = context,
+                    bookId = book.id,
+                    onProgress = { p -> downloadProgress = p }
+                )
+                val helper = PdfRendererHelper(file)
+                pdfFile = file
+                rendererHelper = helper
+                totalPages = helper.pageCount.coerceAtLeast(1)
+                isLoading = false
+            } catch (e: Exception) {
+                isLoading = false
+                errorMessage = e.localizedMessage ?: "စာအုပ် ဖတ်ရှုရန် ဖွင့်၍ မရနိုင်သေးပါ"
+            }
+        }
     }
 
-    // Handle system back button and close
-    val handleExit = {
+    LaunchedEffect(book.id) {
+        loadBookPdf()
+    }
+
+    // Clean up PdfRenderer when disposing
+    DisposableEffect(Unit) {
+        onDispose {
+            saveCurrentPosition()
+            rendererHelper?.close()
+        }
+    }
+
+    // Sync current page with visible list item
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.firstVisibleItemIndex }
+            .distinctUntilChanged()
+            .collect { index ->
+                val newPage = index + 1
+                if (newPage != currentPage && newPage in 1..totalPages) {
+                    currentPage = newPage
+                    saveCurrentPosition()
+                }
+            }
+    }
+
+    // Intercept back button to safely save and close
+    BackHandler {
         saveCurrentPosition()
         onClose()
     }
 
-    BackHandler { handleExit() }
-
-    // Save periodically and on disposal
-    DisposableEffect(Unit) {
-        onDispose {
-            saveCurrentPosition()
-        }
-    }
-
-    // Auto-hide resume banner after 5 seconds
-    LaunchedEffect(showResumeBanner) {
-        if (showResumeBanner) {
-            delay(5000)
-            showResumeBanner = false
-        }
-    }
-
-    // PDF viewer URL
-    val viewerUrl = remember(book.id) {
-        val directUrl = "https://library.yatal.tech/api/preview/${book.id}"
-        val encoded = URLEncoder.encode(directUrl, "UTF-8")
-        "https://docs.google.com/gview?embedded=true&url=$encoded"
+    // Background color based on reader theme
+    val readerBgColor = when (readerTheme) {
+        ReaderTheme.LIGHT -> Color(0xFFF3F3F5)
+        ReaderTheme.SEPIA -> Color(0xFFECE3D2)
+        ReaderTheme.DARK -> Color(0xFF141414)
     }
 
     Scaffold(
         modifier = Modifier
             .fillMaxSize()
             .testTag("pdf_reader_screen"),
-        containerColor = DarkBackground,
+        containerColor = readerBgColor,
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = book.cleanTitle,
-                            color = TextPrimary,
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+            AnimatedVisibility(
+                visible = showControls,
+                enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut()
+            ) {
+                TopAppBar(
+                    title = {
+                        Column {
                             Text(
-                                text = if (book.author.isNotBlank()) "${book.author} • " else "",
+                                text = book.cleanTitle,
+                                color = TextPrimary,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = if (book.author.isNotBlank()) book.author else "Yatal Library",
                                 color = TextSecondary,
                                 fontSize = 11.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
-                            Text(
-                                text = "စာမျက်နှာ $currentPage",
-                                color = AmberPrimary,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
                         }
-                    }
-                },
-                navigationIcon = {
-                    IconButton(
-                        onClick = handleExit,
-                        modifier = Modifier.testTag("reader_back_btn")
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "နောက်သို့ (မှတ်တမ်း သိမ်းဆည်းမည်)",
-                            tint = TextPrimary
-                        )
-                    }
-                },
-                actions = {
-                    // Quick Bookmark / Save Button
-                    IconButton(
-                        onClick = {
-                            saveCurrentPosition()
-                            showBookmarkFeedback = true
-                            Toast.makeText(context, "စာမျက်နှာ $currentPage တွင် မှတ်သားပြီးပါပြီ", Toast.LENGTH_SHORT).show()
-                        },
-                        modifier = Modifier.testTag("reader_save_bookmark_btn")
-                    ) {
-                        Icon(
-                            imageVector = if (showBookmarkFeedback) Icons.Filled.BookmarkAdded else Icons.Filled.Bookmark,
-                            contentDescription = "စာမျက်နှာ မှတ်သားမည်",
-                            tint = AmberPrimary
-                        )
-                    }
-
-                    // Download
-                    IconButton(
-                        onClick = { onDownloadClick(book) },
-                        modifier = Modifier.testTag("reader_download_btn")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Download,
-                            contentDescription = "ဒေါင်းလုဒ်",
-                            tint = TextSecondary
-                        )
-                    }
-
-                    // Open externally
-                    IconButton(
-                        onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://library.yatal.tech/api/preview/${book.id}"))
-                            context.startActivity(intent)
-                        },
-                        modifier = Modifier.testTag("reader_external_btn")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.OpenInBrowser,
-                            contentDescription = "ပြင်ပတွင် ဖွင့်ဖတ်မည်",
-                            tint = TextSecondary
-                        )
-                    }
-
-                    // Share
-                    IconButton(
-                        onClick = {
-                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                type = "text/plain"
-                                putExtra(Intent.EXTRA_SUBJECT, book.cleanTitle)
-                                putExtra(Intent.EXTRA_TEXT, "«${book.cleanTitle}» ကို Yatal Library တွင် ဖတ်ရှုပါ: https://library.yatal.tech/?book=${book.id}")
-                            }
-                            context.startActivity(Intent.createChooser(shareIntent, "ဝေမျှရန်"))
-                        }
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Share,
-                            contentDescription = "ဝေမျှမည်",
-                            tint = TextSecondary
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = DarkSurface
-                )
-            )
-        }
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .background(DarkBackground)
-        ) {
-            // Main WebView
-            AndroidView(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .testTag("pdf_webview"),
-                factory = { ctx ->
-                    WebView(ctx).apply {
-                        webViewRef = this
-                        settings.apply {
-                            javaScriptEnabled = true
-                            domStorageEnabled = true
-                            loadWithOverviewMode = true
-                            useWideViewPort = true
-                            builtInZoomControls = true
-                            displayZoomControls = false
-                            cacheMode = WebSettings.LOAD_DEFAULT
-                        }
-
-                        // JavaScript interface for scroll tracking
-                        addJavascriptInterface(object {
-                            @JavascriptInterface
-                            fun onScroll(ratio: Float) {
-                                scrollRatio = ratio.coerceIn(0f, 1f)
-                                if (totalPages > 1) {
-                                    val estimated = ((ratio * totalPages).toInt() + 1).coerceIn(1, totalPages)
-                                    currentPage = estimated
-                                }
-                            }
-                        }, "AndroidReader")
-
-                        webChromeClient = object : WebChromeClient() {
-                            override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                                loadProgress = newProgress / 100f
-                                if (newProgress >= 90) {
-                                    isLoading = false
-                                }
-                            }
-                        }
-
-                        webViewClient = object : WebViewClient() {
-                            override fun onPageFinished(view: WebView?, url: String?) {
-                                isLoading = false
-                                // Restore scroll position if previously saved
-                                if (scrollRatio > 0.02f) {
-                                    val script = "setTimeout(function() { window.scrollTo(0, (document.body.scrollHeight - window.innerHeight) * $scrollRatio); }, 600);"
-                                    view?.evaluateJavascript(script, null)
-                                }
-                                // Inject scroll listener
-                                val scrollListenerScript = """
-                                    window.addEventListener('scroll', function() {
-                                        var max = document.body.scrollHeight - window.innerHeight;
-                                        if (max > 0) {
-                                            var ratio = window.scrollY / max;
-                                            if (window.AndroidReader) {
-                                                window.AndroidReader.onScroll(ratio);
-                                            }
-                                        }
-                                    });
-                                """.trimIndent()
-                                view?.evaluateJavascript(scrollListenerScript, null)
-                            }
-
-                            override fun onReceivedError(
-                                view: WebView?,
-                                request: WebResourceRequest?,
-                                error: WebResourceError?
-                            ) {
-                                hasError = true
-                                isLoading = false
-                            }
-                        }
-
-                        loadUrl(viewerUrl)
-                    }
-                },
-                update = { webView ->
-                    webViewRef = webView
-                }
-            )
-
-            // Top Linear Progress Indicator during loading
-            if (isLoading) {
-                LinearProgressIndicator(
-                    progress = { loadProgress },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .align(Alignment.TopCenter),
-                    color = AmberPrimary,
-                    trackColor = DarkSurface
-                )
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(DarkBackground.copy(alpha = 0.85f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(
-                            color = AmberPrimary,
-                            modifier = Modifier.size(40.dp)
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = "စာအုပ် ဖတ်ရှုရန် ပြင်ဆင်နေပါသည်…",
-                            color = TextPrimary,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = if (savedProgress != null && savedProgress.currentPage > 1)
-                                "ယခင်ဖတ်လက်စ စာမျက်နှာ ${savedProgress.currentPage} သို့ ဆက်လက်ပို့ဆောင်ပေးပါမည်"
-                            else "ခဏ စောင့်ဆိုင်းပေးပါ",
-                            color = TextMuted,
-                            fontSize = 11.5.sp,
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                }
-            }
-
-            // Fallback error view
-            if (hasError) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(DarkBackground)
-                        .padding(24.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            text = "စာအုပ် preview ကို တိုက်ရိုက်မဖော်ပြနိုင်သေးပါ",
-                            color = TextPrimary,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "ဒေါင်းလုဒ် ရယူပြီး သို့မဟုတ် ပြင်ပ browser/PDF reader တွင် တိုက်ရိုက်ဖတ်ရှုနိုင်ပါသည်",
-                            color = TextSecondary,
-                            fontSize = 12.sp,
-                            textAlign = TextAlign.Center
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Button(
-                                onClick = { onDownloadClick(book) },
-                                colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary)
-                            ) {
-                                Text("PDF ဒေါင်းလုဒ် ရယူမည်", color = Color.Black)
-                            }
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Button(
-                                onClick = {
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://library.yatal.tech/api/preview/${book.id}"))
-                                    context.startActivity(intent)
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = DarkSurface)
-                            ) {
-                                Text("ပြင်ပတွင် ဖွင့်မည်", color = TextPrimary)
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Resumed from Last Position Notification Banner
-            AnimatedVisibility(
-                visible = showResumeBanner,
-                enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
-                exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(12.dp)
-                    .align(Alignment.TopCenter)
-            ) {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = DarkSurfaceVariant),
-                    border = CardDefaults.outlinedCardBorder().copy(
-                        brush = Brush.horizontalGradient(listOf(AmberPrimary, AmberPrimary.copy(alpha = 0.5f)))
-                    ),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Bookmark,
-                                contentDescription = null,
-                                tint = AmberPrimary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "ယခင်ဖတ်လက်စ စာမျက်နှာ $currentPage မှ ပြန်လည်စတင်ထားပါသည်",
-                                color = TextPrimary,
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            TextButton(
-                                onClick = {
-                                    currentPage = 1
-                                    scrollRatio = 0f
-                                    saveCurrentPosition()
-                                    webViewRef?.evaluateJavascript("window.scrollTo(0, 0);", null)
-                                    showResumeBanner = false
-                                },
-                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.RestartAlt,
-                                    contentDescription = "Restart",
-                                    tint = AmberPrimary,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Spacer(modifier = Modifier.width(2.dp))
-                                Text(
-                                    text = "အစမှ",
-                                    color = AmberPrimary,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-
-                            IconButton(
-                                onClick = { showResumeBanner = false },
-                                modifier = Modifier.size(24.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "ပိတ်မည်",
-                                    tint = TextMuted,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Bottom Sticky 'Continue Reading' Navigation Dock
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 14.dp)
-                    .align(Alignment.BottomCenter)
-                    .testTag("reader_bottom_controls"),
-                colors = CardDefaults.cardColors(containerColor = DarkSurface.copy(alpha = 0.95f)),
-                border = CardDefaults.outlinedCardBorder().copy(
-                    brush = Brush.horizontalGradient(listOf(DarkCardBorder, AmberPrimary.copy(alpha = 0.3f), DarkCardBorder))
-                ),
-                shape = RoundedCornerShape(16.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp)
-                ) {
-                    // Page Progress Bar & Position row
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        // Previous Page Button
+                    },
+                    navigationIcon = {
                         IconButton(
                             onClick = {
-                                if (currentPage > 1) {
-                                    currentPage--
-                                    saveCurrentPosition()
-                                    // Smooth scroll up in webview
-                                    webViewRef?.evaluateJavascript("window.scrollBy(0, -window.innerHeight * 0.85);", null)
-                                }
+                                saveCurrentPosition()
+                                onClose()
                             },
-                            enabled = currentPage > 1,
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(DarkSurfaceVariant)
-                                .testTag("reader_prev_page_btn")
+                            modifier = Modifier.testTag("pdf_reader_back_btn")
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "ယခင် စာမျက်နှာ",
-                                tint = if (currentPage > 1) TextPrimary else TextMuted,
-                                modifier = Modifier.size(16.dp)
+                                contentDescription = "နောက်သို့",
+                                tint = AmberPrimary
+                            )
+                        }
+                    },
+                    actions = {
+                        // Theme Switcher Button
+                        IconButton(
+                            onClick = {
+                                readerTheme = when (readerTheme) {
+                                    ReaderTheme.LIGHT -> ReaderTheme.SEPIA
+                                    ReaderTheme.SEPIA -> ReaderTheme.DARK
+                                    ReaderTheme.DARK -> ReaderTheme.LIGHT
+                                }
+                            }
+                        ) {
+                            Icon(
+                                imageVector = when (readerTheme) {
+                                    ReaderTheme.LIGHT -> Icons.Filled.WbSunny
+                                    ReaderTheme.SEPIA -> Icons.Filled.LightMode
+                                    ReaderTheme.DARK -> Icons.Filled.DarkMode
+                                },
+                                contentDescription = "စာဖတ် နောက်ခံအရောင်",
+                                tint = AmberPrimary
                             )
                         }
 
-                        // Center Page Jump Pill
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(DarkSurfaceVariant)
-                                .border(1.dp, AmberPrimary.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
-                                .clickable { showJumpDialog = true }
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
-                                .testTag("reader_page_indicator_btn")
+                        // Bookmark Button
+                        IconButton(
+                            onClick = {
+                                saveCurrentPosition()
+                                Toast.makeText(
+                                    context,
+                                    "စာမျက်နှာ $currentPage တွင် မှတ်သားပြီးပါပြီ",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
+                            modifier = Modifier.testTag("pdf_bookmark_btn")
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.Edit,
-                                    contentDescription = "စာမျက်နှာ ရွေးမည်",
-                                    tint = AmberPrimary,
-                                    modifier = Modifier.size(13.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
+                            Icon(
+                                imageVector = if (isBookmarked) Icons.Filled.BookmarkAdded else Icons.Filled.Bookmark,
+                                contentDescription = "မှတ်သားရန်",
+                                tint = if (isBookmarked) AmberPrimary else TextSecondary
+                            )
+                        }
+
+                        // Share Details Button (No Website Link)
+                        IconButton(
+                            onClick = {
+                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(
+                                        Intent.EXTRA_SUBJECT,
+                                        "${book.cleanTitle} - Yatal Digital Library"
+                                    )
+                                    putExtra(
+                                        Intent.EXTRA_TEXT,
+                                        "«${book.cleanTitle}» (${book.category})\nစာရေးဆရာ: ${if (book.author.isNotBlank()) book.author else "အမည်မသိ"}\nအရွယ်အစား: ${book.formattedSize}\n(Yatal Library အက်ပ်တွင် တိုက်ရိုက် ဖတ်ရှုနေပါသည်)"
+                                    )
+                                }
+                                context.startActivity(Intent.createChooser(shareIntent, "စာအုပ် ဝေမျှရန်"))
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Share,
+                                contentDescription = "စာအုပ် ဝေမျှရန်",
+                                tint = TextSecondary
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = DarkSurface.copy(alpha = 0.95f)
+                    )
+                )
+            }
+        },
+        bottomBar = {
+            AnimatedVisibility(
+                visible = showControls && !isLoading && errorMessage == null,
+                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+            ) {
+                SurfaceBottomBar(
+                    currentPage = currentPage,
+                    totalPages = totalPages,
+                    zoomScale = zoomScale,
+                    onZoomIn = { zoomScale = (zoomScale + 0.25f).coerceAtMost(2.5f) },
+                    onZoomOut = { zoomScale = (zoomScale - 0.25f).coerceAtLeast(1.0f) },
+                    onResetZoom = { zoomScale = 1.0f },
+                    onPrevPage = {
+                        if (currentPage > 1) {
+                            coroutineScope.launch {
+                                listState.animateScrollToItem(currentPage - 2)
+                            }
+                        }
+                    },
+                    onNextPage = {
+                        if (currentPage < totalPages) {
+                            coroutineScope.launch {
+                                listState.animateScrollToItem(currentPage)
+                            }
+                        }
+                    },
+                    onSliderChange = { newPage ->
+                        currentPage = newPage
+                        coroutineScope.launch {
+                            listState.scrollToItem(newPage - 1)
+                        }
+                    },
+                    onOpenJumpDialog = { showJumpDialog = true }
+                )
+            }
+        }
+    ) { paddingValues ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+        ) {
+            when {
+                isLoading -> {
+                    // Direct in-app book loading screen
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Card(
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                            border = CardDefaults.outlinedCardBorder().copy(
+                                brush = androidx.compose.ui.graphics.SolidColor(DarkCardBorder)
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(60.dp)
+                                        .clip(CircleShape)
+                                        .background(AmberPrimary.copy(alpha = 0.15f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.MenuBook,
+                                        contentDescription = null,
+                                        tint = AmberPrimary,
+                                        modifier = Modifier.size(32.dp)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(16.dp))
+
                                 Text(
-                                    text = if (totalPages > 1) "စာမျက်နှာ $currentPage / $totalPages" else "စာမျက်နှာ $currentPage",
+                                    text = book.cleanTitle,
                                     color = TextPrimary,
-                                    fontSize = 12.5.sp,
-                                    fontWeight = FontWeight.Bold
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Center
                                 )
-                                if (locationDesc.isNotBlank() && locationDesc != "စာမျက်နှာ $currentPage") {
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "($locationDesc)",
+
+                                Spacer(modifier = Modifier.height(6.dp))
+
+                                Text(
+                                    text = "စာအုပ်ကို တိုက်ရိုက် ဖတ်ရှုရန် ပြင်ဆင်နေပါသည်…",
+                                    color = TextSecondary,
+                                    fontSize = 12.sp,
+                                    textAlign = TextAlign.Center
+                                )
+
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                if (downloadProgress > 0f) {
+                                    LinearProgressIndicator(
+                                        progress = { downloadProgress },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(6.dp)
+                                            .clip(RoundedCornerShape(3.dp)),
                                         color = AmberPrimary,
-                                        fontSize = 11.sp
+                                        trackColor = DarkCardBorder
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = "${(downloadProgress * 100).toInt()}% ပြီးစီးပါပြီ",
+                                        color = AmberPrimary,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                } else {
+                                    CircularProgressIndicator(
+                                        color = AmberPrimary,
+                                        modifier = Modifier.size(32.dp),
+                                        strokeWidth = 3.dp
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(14.dp))
+
+                                Text(
+                                    text = "ဒေါင်းလုဒ်လုပ်ရန် မလိုအပ်ပါ • အက်ပ်ထဲတွင် တိုက်ရိုက်ဖတ်ရှုနိုင်ပါသည်",
+                                    color = TextMuted,
+                                    fontSize = 11.sp,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    }
+                }
+
+                errorMessage != null -> {
+                    // In-app error screen with retry (No website redirect)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Card(
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                            border = CardDefaults.outlinedCardBorder().copy(
+                                brush = androidx.compose.ui.graphics.SolidColor(DarkCardBorder)
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.RestartAlt,
+                                    contentDescription = null,
+                                    tint = AmberPrimary,
+                                    modifier = Modifier.size(42.dp)
+                                )
+
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                Text(
+                                    text = "စာအုပ် တိုက်ရိုက်ဖွင့်ရာတွင် အခက်အခဲရှိနေပါသည်",
+                                    color = TextPrimary,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Center
+                                )
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                Text(
+                                    text = errorMessage ?: "အင်တာနက်ချိတ်ဆက်မှုကို စစ်ဆေးပြီး ပြန်လည် ကြိုးစားကြည့်ပါ",
+                                    color = TextSecondary,
+                                    fontSize = 12.sp,
+                                    textAlign = TextAlign.Center
+                                )
+
+                                Spacer(modifier = Modifier.height(20.dp))
+
+                                Button(
+                                    onClick = { loadBookPdf() },
+                                    colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.testTag("pdf_retry_btn")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.RestartAlt,
+                                        contentDescription = null,
+                                        tint = Color.Black,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("ပြန်လည် ကြိုးစားမည်", color = Color.Black, fontWeight = FontWeight.Bold)
+                                }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                TextButton(onClick = onClose) {
+                                    Text("စာအုပ်စင်သို့ ပြန်သွားမည်", color = TextSecondary)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                rendererHelper != null -> {
+                    // Native PDF Page LazyColumn
+                    val helper = rendererHelper!!
+                    val horizontalScrollState = rememberScrollState()
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) {
+                                showControls = !showControls
+                            }
+                    ) {
+                        Box(
+                            modifier = if (zoomScale > 1.05f) {
+                                Modifier
+                                    .fillMaxSize()
+                                    .horizontalScroll(horizontalScrollState)
+                            } else {
+                                Modifier.fillMaxSize()
+                            }
+                        ) {
+                            LazyColumn(
+                                state = listState,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .testTag("pdf_lazy_column"),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                items(
+                                    count = helper.pageCount,
+                                    key = { index -> index }
+                                ) { pageIndex ->
+                                    PdfPageItem(
+                                        pageIndex = pageIndex,
+                                        rendererHelper = helper,
+                                        zoomScale = zoomScale,
+                                        theme = readerTheme
                                     )
                                 }
                             }
                         }
-
-                        // Next Page Button
-                        IconButton(
-                            onClick = {
-                                currentPage++
-                                if (currentPage > totalPages) {
-                                    totalPages = currentPage
-                                }
-                                saveCurrentPosition()
-                                // Smooth scroll down in webview
-                                webViewRef?.evaluateJavascript("window.scrollBy(0, window.innerHeight * 0.85);", null)
-                            },
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(DarkSurfaceVariant)
-                                .testTag("reader_next_page_btn")
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                contentDescription = "နောက် စာမျက်နှာ",
-                                tint = TextPrimary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    // Reading Progress slider and save indicator
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "ဆက်လက်ဖတ်ရှုရန် အလိုအလျောက် မှတ်သားထားသည်",
-                            color = GreenOnline,
-                            fontSize = 9.5.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-
-                        Text(
-                            text = if (totalPages > 1) "${((currentPage.toFloat() / totalPages.toFloat()) * 100).toInt()}%" else "စာဖတ်နေဆဲ",
-                            color = AmberPrimary,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold
-                        )
                     }
                 }
             }
         }
     }
 
-    // Jump to Page / Chapter Dialog
+    // Jump to Page Dialog
     if (showJumpDialog) {
         var pageInput by remember { mutableStateOf(currentPage.toString()) }
-        var totalInput by remember { mutableStateOf(if (totalPages > 1) totalPages.toString() else "") }
         var chapterInput by remember { mutableStateOf(locationDesc) }
 
         AlertDialog(
@@ -704,7 +640,7 @@ fun PdfReaderScreen(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "စာမျက်နှာ (သို့) အခန်း သတ်မှတ်မည်",
+                        text = "စာမျက်နှာသို့ သွားမည်",
                         color = TextPrimary,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold
@@ -714,61 +650,40 @@ fun PdfReaderScreen(
             text = {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        text = "ဖတ်ရှုနေသော စာမျက်နှာနံပါတ် သို့မဟုတ် အခန်းအမည်ကို သတ်မှတ်ပြီး သိမ်းဆည်းနိုင်ပါသည်:",
+                        text = "စုစုပေါင်း $totalPages မျက်နှာ ရှိပါသည်:",
                         color = TextSecondary,
                         fontSize = 12.sp
                     )
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = pageInput,
-                            onValueChange = { pageInput = it.filter { ch -> ch.isDigit() } },
-                            label = { Text("လက်ရှိ စာမျက်နှာ", fontSize = 11.sp) },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next),
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("jump_page_input"),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = AmberPrimary,
-                                unfocusedBorderColor = DarkCardBorder,
-                                focusedTextColor = TextPrimary,
-                                unfocusedTextColor = TextPrimary
-                            )
+                    OutlinedTextField(
+                        value = pageInput,
+                        onValueChange = { pageInput = it.filter { ch -> ch.isDigit() } },
+                        label = { Text("စာမျက်နှာနံပါတ် (၁ မှ $totalPages)", fontSize = 11.sp) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Number,
+                            imeAction = ImeAction.Done
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("jump_page_input"),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = AmberPrimary,
+                            unfocusedBorderColor = DarkCardBorder,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
                         )
-
-                        OutlinedTextField(
-                            value = totalInput,
-                            onValueChange = { totalInput = it.filter { ch -> ch.isDigit() } },
-                            label = { Text("စုစုပေါင်း (ရှိလျှင်)", fontSize = 11.sp) },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("jump_total_input"),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = AmberPrimary,
-                                unfocusedBorderColor = DarkCardBorder,
-                                focusedTextColor = TextPrimary,
-                                unfocusedTextColor = TextPrimary
-                            )
-                        )
-                    }
+                    )
 
                     Spacer(modifier = Modifier.height(8.dp))
 
                     OutlinedTextField(
                         value = chapterInput,
                         onValueChange = { chapterInput = it },
-                        label = { Text("အခန်း / မှတ်ချက် (ဥပမာ- အခန်း ၃)", fontSize = 11.sp) },
+                        label = { Text("မှတ်စု / အခန်းအမည် (ဥပမာ- အခန်း ၃)", fontSize = 11.sp) },
                         singleLine = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("jump_chapter_input"),
+                        modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = AmberPrimary,
                             unfocusedBorderColor = DarkCardBorder,
@@ -781,39 +696,291 @@ fun PdfReaderScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        val parsedPage = pageInput.toIntOrNull()?.coerceAtLeast(1) ?: currentPage
-                        val parsedTotal = totalInput.toIntOrNull()?.coerceAtLeast(parsedPage) ?: totalPages.coerceAtLeast(parsedPage)
+                        val parsedPage = pageInput.toIntOrNull()?.coerceIn(1, totalPages) ?: currentPage
                         currentPage = parsedPage
-                        totalPages = parsedTotal
                         locationDesc = chapterInput.trim()
-
-                        val ratio = if (totalPages > 1) {
-                            ((currentPage - 1).toFloat() / (totalPages - 1).toFloat()).coerceIn(0f, 1f)
-                        } else 0f
-                        scrollRatio = ratio
-
                         saveCurrentPosition()
                         showJumpDialog = false
-
-                        // Scroll webview to approximate ratio
-                        if (ratio > 0f) {
-                            webViewRef?.evaluateJavascript("window.scrollTo(0, (document.body.scrollHeight - window.innerHeight) * $ratio);", null)
+                        coroutineScope.launch {
+                            listState.scrollToItem(parsedPage - 1)
                         }
-                        Toast.makeText(context, "စာမျက်နှာ $currentPage တွင် မှတ်တမ်းတင်ပြီးပါပြီ", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            context,
+                            "စာမျက်နှာ $currentPage သို့ ရောက်ရှိပါပြီ",
+                            Toast.LENGTH_SHORT
+                        ).show()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary),
                     modifier = Modifier.testTag("jump_confirm_btn")
                 ) {
-                    Text("မှတ်တမ်းတင်မည်", color = Color.Black, fontWeight = FontWeight.Bold)
+                    Text("သွားမည်", color = Color.Black, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
-                OutlinedButton(
-                    onClick = { showJumpDialog = false }
-                ) {
+                OutlinedButton(onClick = { showJumpDialog = false }) {
                     Text("မလုပ်တော့ပါ", color = TextSecondary)
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun PdfPageItem(
+    pageIndex: Int,
+    rendererHelper: PdfRendererHelper,
+    zoomScale: Float,
+    theme: ReaderTheme,
+    modifier: Modifier = Modifier
+) {
+    val configuration = LocalConfiguration.current
+    val density = LocalDensity.current
+    val screenWidthPx = with(density) { configuration.screenWidthDp.dp.roundToPx() }
+    val targetWidth = (screenWidthPx * zoomScale).toInt().coerceAtLeast(400)
+
+    var pageBitmap by remember(pageIndex, zoomScale) { mutableStateOf<Bitmap?>(null) }
+    var isLoadingPage by remember(pageIndex, zoomScale) { mutableStateOf(true) }
+
+    LaunchedEffect(pageIndex, zoomScale) {
+        isLoadingPage = true
+        val bmp = rendererHelper.renderPage(pageIndex, targetWidth)
+        pageBitmap = bmp
+        isLoadingPage = false
+    }
+
+    val pageCardColor = when (theme) {
+        ReaderTheme.LIGHT -> Color.White
+        ReaderTheme.SEPIA -> Color(0xFFFBF0D9)
+        ReaderTheme.DARK -> Color(0xFF222222)
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp, horizontal = if (zoomScale <= 1.05f) 8.dp else 0.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            shape = RoundedCornerShape(4.dp),
+            colors = CardDefaults.cardColors(containerColor = pageCardColor),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            modifier = Modifier.wrapContentSize()
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                if (pageBitmap != null) {
+                    Image(
+                        bitmap = pageBitmap!!.asImageBitmap(),
+                        contentDescription = "စာမျက်နှာ ${pageIndex + 1}",
+                        modifier = Modifier.fillMaxWidth(),
+                        contentScale = ContentScale.FillWidth
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(480.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isLoadingPage) {
+                            CircularProgressIndicator(
+                                color = AmberPrimary,
+                                modifier = Modifier.size(28.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text(
+                                text = "စာမျက်နှာ ${pageIndex + 1}",
+                                color = Color.Gray,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+
+                // Small page number footer on page
+                Text(
+                    text = "- ${pageIndex + 1} -",
+                    color = when (theme) {
+                        ReaderTheme.LIGHT -> Color.Gray
+                        ReaderTheme.SEPIA -> Color(0xFF8D7B68)
+                        ReaderTheme.DARK -> Color.DarkGray
+                    },
+                    fontSize = 10.sp,
+                    modifier = Modifier.padding(vertical = 4.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SurfaceBottomBar(
+    currentPage: Int,
+    totalPages: Int,
+    zoomScale: Float,
+    onZoomIn: () -> Unit,
+    onZoomOut: () -> Unit,
+    onResetZoom: () -> Unit,
+    onPrevPage: () -> Unit,
+    onNextPage: () -> Unit,
+    onSliderChange: (Int) -> Unit,
+    onOpenJumpDialog: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(12.dp),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = DarkSurface.copy(alpha = 0.96f)
+        ),
+        border = CardDefaults.outlinedCardBorder().copy(
+            brush = androidx.compose.ui.graphics.SolidColor(DarkCardBorder)
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 8.dp)
+        ) {
+            // Page slider & info
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "စာမျက်နှာ $currentPage / $totalPages",
+                    color = AmberPrimary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                val percentage = if (totalPages > 1) {
+                    ((currentPage - 1).toFloat() / (totalPages - 1).toFloat() * 100).toInt()
+                } else 100
+                Text(
+                    text = "$percentage%",
+                    color = TextSecondary,
+                    fontSize = 11.sp
+                )
+
+                // Zoom control pills
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    IconButton(
+                        onClick = onZoomOut,
+                        modifier = Modifier.size(28.dp),
+                        enabled = zoomScale > 1.05f
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Remove,
+                            contentDescription = "ချုံ့မည်",
+                            tint = if (zoomScale > 1.05f) TextPrimary else TextMuted,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+
+                    Text(
+                        text = "${(zoomScale * 100).toInt()}%",
+                        color = TextSecondary,
+                        fontSize = 10.sp,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .clickable { onResetZoom() }
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                    )
+
+                    IconButton(
+                        onClick = onZoomIn,
+                        modifier = Modifier.size(28.dp),
+                        enabled = zoomScale < 2.45f
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Add,
+                            contentDescription = "ချဲ့မည်",
+                            tint = if (zoomScale < 2.45f) TextPrimary else TextMuted,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+
+            // Slider
+            if (totalPages > 1) {
+                Slider(
+                    value = currentPage.toFloat(),
+                    onValueChange = { onSliderChange(it.toInt().coerceIn(1, totalPages)) },
+                    valueRange = 1f..totalPages.toFloat(),
+                    steps = if (totalPages > 2) totalPages - 2 else 0,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = SliderDefaults.colors(
+                        thumbColor = AmberPrimary,
+                        activeTrackColor = AmberPrimary,
+                        inactiveTrackColor = DarkCardBorder
+                    )
+                )
+            }
+
+            // Prev / Jump / Next navigation buttons
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(
+                    onClick = onPrevPage,
+                    enabled = currentPage > 1
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.KeyboardArrowLeft,
+                        contentDescription = null,
+                        tint = if (currentPage > 1) AmberPrimary else TextMuted,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = "ရှေ့မျက်နှာ",
+                        color = if (currentPage > 1) TextPrimary else TextMuted,
+                        fontSize = 11.sp
+                    )
+                }
+
+                OutlinedButton(
+                    onClick = onOpenJumpDialog,
+                    shape = RoundedCornerShape(8.dp),
+                    border = ButtonDefaults.outlinedButtonBorder.copy(
+                        brush = androidx.compose.ui.graphics.SolidColor(DarkCardBorder)
+                    ),
+                    modifier = Modifier.testTag("pdf_jump_page_btn")
+                ) {
+                    Text(
+                        text = "စာမျက်နှာ ရွေးမည်",
+                        color = AmberPrimary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                TextButton(
+                    onClick = onNextPage,
+                    enabled = currentPage < totalPages
+                ) {
+                    Text(
+                        text = "နောက်မျက်နှာ",
+                        color = if (currentPage < totalPages) TextPrimary else TextMuted,
+                        fontSize = 11.sp
+                    )
+                    Icon(
+                        imageVector = Icons.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = if (currentPage < totalPages) AmberPrimary else TextMuted,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
     }
 }
