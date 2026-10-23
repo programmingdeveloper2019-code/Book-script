@@ -89,10 +89,12 @@ data class LibraryUiState(
     val isLoading: Boolean = false,
     val isLoadingMore: Boolean = false,
     val isRefreshing: Boolean = false,
+    val isSearchingOnline: Boolean = false,
     val isOfflineMode: Boolean = false,
     val currentPage: Int = 1,
     val totalPages: Int = 1,
     val totalBooksCount: Int = 0,
+    val websiteTotalBooksCount: Int = 0,
     val lastSyncTime: String = "",
     val activeTab: LibraryTab = LibraryTab.BOOKS,
     val selectedBookForDetail: Book? = null,
@@ -275,7 +277,7 @@ class BookViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Filter books by Genre using Room database
+     * Filter books by Genre using Room database and fetch matching categories online
      */
     fun selectGenre(genreDisplayName: String) {
         val normalized = BookGenre.fromDisplayNameOrId(genreDisplayName)
@@ -291,13 +293,15 @@ class BookViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.value.genreCounts[targetGenre] ?: 0
         }
 
+        val estimatedPages = if (expectedTotal > 0) ((expectedTotal + 59) / 60) else 10
+
         _uiState.update {
             it.copy(
                 selectedGenre = targetGenre,
                 selectedCategory = "ALL",
                 searchQuery = "",
                 currentPage = 1,
-                totalPages = 1,
+                totalPages = estimatedPages,
                 isLoadingMore = false,
                 totalBooksCount = if (expectedTotal > 0) expectedTotal else it.totalBooksCount,
                 activeTab = LibraryTab.BOOKS,
@@ -309,18 +313,26 @@ class BookViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             if (targetGenre != "ALL") {
                 val matchingCats = getCategoriesForGenre(normalized, _uiState.value.categories)
-                for (catName in matchingCats.take(3)) {
+                for (catName in matchingCats.take(5)) {
                     repository.fetchBooks(category = catName, page = 1, limit = 50)
                 }
             } else {
-                repository.fetchBooks(category = "ALL", page = 1, limit = 60)
+                val resp = repository.fetchBooks(category = "ALL", page = 1, limit = 60).getOrNull()
+                if (resp != null) {
+                    _uiState.update {
+                        it.copy(
+                            totalPages = resp.totalPages,
+                            totalBooksCount = resp.total
+                        )
+                    }
+                }
             }
             _uiState.update { it.copy(isLoading = false) }
         }
     }
 
     /**
-     * Filter books by Category using Room database
+     * Filter books by Category using Room database and online sync
      */
     fun selectCategory(category: String) {
         val targetCat = if (category == "ALL") "ALL" else category
@@ -335,13 +347,15 @@ class BookViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.value.categories.find { it.name == targetCat }?.count ?: 0
         }
 
+        val estimatedPages = if (expectedTotal > 0) ((expectedTotal + 59) / 60) else 1
+
         _uiState.update {
             it.copy(
                 selectedCategory = targetCat,
                 selectedGenre = "ALL",
                 searchQuery = "",
                 currentPage = 1,
-                totalPages = 1,
+                totalPages = estimatedPages,
                 isLoadingMore = false,
                 totalBooksCount = if (expectedTotal > 0) expectedTotal else it.totalBooksCount,
                 activeTab = LibraryTab.BOOKS,
@@ -422,8 +436,21 @@ class BookViewModel(application: Application) : AndroidViewModel(application) {
                 searchQuery = trimmed,
                 searchScope = SearchFilterScope.AUTHOR,
                 activeTab = LibraryTab.BOOKS,
-                selectedBookForDetail = null
+                selectedBookForDetail = null,
+                currentPage = 1,
+                isSearchingOnline = true
             )
+        }
+        viewModelScope.launch {
+            val result = repository.fetchBooks(category = "ALL", query = trimmed, page = 1, limit = 60)
+            val resp = result.getOrNull()
+            _uiState.update {
+                it.copy(
+                    isSearchingOnline = false,
+                    currentPage = 1,
+                    totalPages = resp?.totalPages ?: 1
+                )
+            }
         }
     }
 
@@ -438,10 +465,32 @@ class BookViewModel(application: Application) : AndroidViewModel(application) {
         searchDebounceJob?.cancel()
         if (newQuery.isBlank()) {
             _searchQuery.value = ""
+            _uiState.update { it.copy(isSearchingOnline = false) }
         } else {
             searchDebounceJob = viewModelScope.launch {
-                delay(60) // Ultra-fast 60ms debounce for instantaneous real-time typing response
+                // Instant real-time local typing filter
                 _searchQuery.value = newQuery.trim()
+
+                // Debounce network request to fetch from website in the background and cache to Room
+                delay(350)
+                val cleanQuery = newQuery.trim()
+                if (cleanQuery.isNotBlank()) {
+                    _uiState.update { it.copy(isSearchingOnline = true) }
+                    val result = repository.fetchBooks(
+                        category = "ALL",
+                        query = cleanQuery,
+                        page = 1,
+                        limit = 60
+                    )
+                    val resp = result.getOrNull()
+                    _uiState.update {
+                        it.copy(
+                            isSearchingOnline = false,
+                            currentPage = 1,
+                            totalPages = resp?.totalPages ?: it.totalPages
+                        )
+                    }
+                }
             }
         }
     }
@@ -455,8 +504,21 @@ class BookViewModel(application: Application) : AndroidViewModel(application) {
             it.copy(
                 searchQuery = trimmed,
                 searchScope = SearchFilterScope.TITLE,
-                activeTab = LibraryTab.BOOKS
+                activeTab = LibraryTab.BOOKS,
+                currentPage = 1,
+                isSearchingOnline = true
             )
+        }
+        viewModelScope.launch {
+            val result = repository.fetchBooks(category = "ALL", query = trimmed, page = 1, limit = 60)
+            val resp = result.getOrNull()
+            _uiState.update {
+                it.copy(
+                    isSearchingOnline = false,
+                    currentPage = 1,
+                    totalPages = resp?.totalPages ?: 1
+                )
+            }
         }
     }
 
@@ -469,7 +531,10 @@ class BookViewModel(application: Application) : AndroidViewModel(application) {
                 searchQuery = "",
                 searchScope = SearchFilterScope.ALL,
                 titleSuggestions = emptyList(),
-                searchMatchCount = 0
+                searchMatchCount = 0,
+                isSearchingOnline = false,
+                currentPage = 1,
+                totalPages = 1
             )
         }
     }
@@ -623,6 +688,7 @@ class BookViewModel(application: Application) : AndroidViewModel(application) {
                 it.copy(
                     categories = cats,
                     genreCounts = genreTotals,
+                    websiteTotalBooksCount = totalInAllCats,
                     totalBooksCount = if (totalInAllCats > 0) totalInAllCats else it.totalBooksCount
                 )
             }
@@ -632,18 +698,24 @@ class BookViewModel(application: Application) : AndroidViewModel(application) {
 
             // 3. Fetch books with generous limit (60)
             val allResult = repository.fetchBooks(category = "ALL", page = 1, limit = 60)
-            val serverTotal = allResult.getOrNull()?.total ?: totalInAllCats
+            val serverResp = allResult.getOrNull()
+            val serverTotal = serverResp?.total ?: totalInAllCats
             if (serverTotal > 0) {
-                _uiState.update { it.copy(totalBooksCount = serverTotal) }
+                _uiState.update {
+                    it.copy(
+                        totalBooksCount = serverTotal,
+                        totalPages = serverResp?.totalPages ?: it.totalPages
+                    )
+                }
             }
-            if ((allResult.getOrNull()?.totalPages ?: 1) > 1) {
+            if ((serverResp?.totalPages ?: 1) > 1) {
                 repository.fetchBooks(category = "ALL", page = 2, limit = 60)
             }
 
-            // Fetch top categories to ensure Room has rich variety across genres
-            val topCategories = listOf("English Books", "Cambridge English Books", "ကွန်ပျူတာနှင့် နည်းပညာ", "စာအုပ်အထွေထွေ", "ပုညခင်", "ရုပ်ပြကာတွန်း")
+            // 4. Background Sync: fetch top diverse categories so Room cache has rich variety across genres
+            val topCategories = cats.sortedByDescending { it.count }.take(8).map { it.name }
             for (cat in topCategories) {
-                repository.fetchBooks(category = cat, page = 1, limit = 40)
+                repository.fetchBooks(category = cat, page = 1, limit = 50)
             }
 
             val timeFormat = SimpleDateFormat("hh:mm a", Locale.getDefault())
@@ -687,22 +759,57 @@ class BookViewModel(application: Application) : AndroidViewModel(application) {
         val total = _uiState.value.totalPages
         if (total > 1 && current >= total) return // all pages loaded
 
+        val currentQuery = _uiState.value.searchQuery.trim()
+        val currentCat = _uiState.value.selectedCategory
+        val currentGenre = _uiState.value.selectedGenre
+
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingMore = true) }
             val nextPage = current + 1
-            val result = repository.fetchBooks(
-                category = _uiState.value.selectedCategory,
-                query = _uiState.value.searchQuery,
-                page = nextPage,
-                limit = 60
-            )
+
+            val result = when {
+                currentQuery.isNotBlank() -> {
+                    repository.fetchBooks(
+                        category = "ALL",
+                        query = currentQuery,
+                        page = nextPage,
+                        limit = 60
+                    )
+                }
+                currentCat != "ALL" -> {
+                    repository.fetchBooks(
+                        category = currentCat,
+                        page = nextPage,
+                        limit = 60
+                    )
+                }
+                currentGenre != "ALL" -> {
+                    val matchingCats = getCategoriesForGenre(BookGenre.fromDisplayNameOrId(currentGenre), _uiState.value.categories)
+                    val targetCat = matchingCats.getOrNull((nextPage - 1) % matchingCats.size.coerceAtLeast(1)) ?: "ALL"
+                    val pageForCat = ((nextPage - 1) / matchingCats.size.coerceAtLeast(1)) + 1
+                    repository.fetchBooks(
+                        category = targetCat,
+                        page = pageForCat,
+                        limit = 50
+                    )
+                }
+                else -> {
+                    // ALL books: endless pagination
+                    repository.fetchBooks(
+                        category = "ALL",
+                        page = nextPage,
+                        limit = 60
+                    )
+                }
+            }
+
             if (result.isSuccess) {
                 val resp = result.getOrNull()
                 _uiState.update {
                     it.copy(
                         currentPage = nextPage,
-                        totalPages = resp?.totalPages ?: it.totalPages,
-                        totalBooksCount = resp?.total ?: it.totalBooksCount,
+                        totalPages = if (resp != null && resp.totalPages > 1) resp.totalPages else it.totalPages,
+                        totalBooksCount = if (resp != null && resp.total > 0) resp.total else it.totalBooksCount,
                         isLoadingMore = false
                     )
                 }

@@ -1,5 +1,6 @@
 package com.example.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -148,6 +149,20 @@ fun YatalLibraryApp(
             }
         )
         return
+    }
+
+    // Android back navigation support for modal, filter sheet, search, and secondary tabs
+    BackHandler(enabled = uiState.selectedBookForDetail != null) {
+        viewModel.selectBookForDetail(null)
+    }
+    BackHandler(enabled = uiState.isFilterSheetOpen && uiState.selectedBookForDetail == null) {
+        viewModel.openFilterSheet(false)
+    }
+    BackHandler(enabled = uiState.searchQuery.isNotBlank() && uiState.selectedBookForDetail == null && !uiState.isFilterSheetOpen) {
+        viewModel.clearSearch()
+    }
+    BackHandler(enabled = uiState.activeTab != LibraryTab.BOOKS && uiState.selectedBookForDetail == null && !uiState.isFilterSheetOpen && uiState.searchQuery.isBlank()) {
+        viewModel.setTab(LibraryTab.BOOKS)
     }
 
     Scaffold(
@@ -536,7 +551,7 @@ private fun BooksCatalogContent(
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = when {
-                            uiState.searchQuery.isNotBlank() -> "“${uiState.searchQuery}” ရှာဖွေမှု (${uiState.searchScope.displayName})"
+                            uiState.searchQuery.isNotBlank() -> "“${uiState.searchQuery}” ရှာဖွေမှု"
                             uiState.selectedCategory != "ALL" -> "«${uiState.selectedCategory}» စာအုပ်များ"
                             uiState.selectedGenre != "ALL" -> "«${uiState.selectedGenre}» စာအုပ်များ"
                             else -> "စာအုပ်အားလုံး"
@@ -547,11 +562,25 @@ private fun BooksCatalogContent(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                    if (uiState.isSearchingOnline) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        CircularProgressIndicator(
+                            color = AmberPrimary,
+                            strokeWidth = 1.5.dp,
+                            modifier = Modifier.size(10.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "ဝက်ဘ်ဆိုက်မှ ရှာဖွေနေဆဲ…",
+                            color = AmberPrimary,
+                            fontSize = 10.sp
+                        )
+                    }
                 }
 
                 Text(
                     text = if (totalAvailable > uiState.books.size) {
-                        "${numberFormat.format(uiState.books.size)} / စုစုပေါင်း ${numberFormat.format(totalAvailable)} အုပ်"
+                        "${numberFormat.format(uiState.books.size)} / ဝက်ဘ်ဆိုက်ရှိ စုစုပေါင်း ${numberFormat.format(totalAvailable)} အုပ်"
                     } else {
                         "စုစုပေါင်း ${numberFormat.format(uiState.books.size)} အုပ်"
                     },

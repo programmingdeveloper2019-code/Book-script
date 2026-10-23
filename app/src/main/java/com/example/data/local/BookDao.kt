@@ -106,6 +106,18 @@ interface BookDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertBooks(books: List<BookEntity>)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertBook(book: BookEntity)
+
+    @androidx.room.Update
+    suspend fun updateBook(book: BookEntity)
+
+    @androidx.room.Delete
+    suspend fun deleteBook(book: BookEntity)
+
+    @Query("SELECT * FROM cached_books WHERE id = :id LIMIT 1")
+    fun getBookById(id: Long): Flow<BookEntity?>
+
     @Query("DELETE FROM cached_books")
     suspend fun clearBooks()
 

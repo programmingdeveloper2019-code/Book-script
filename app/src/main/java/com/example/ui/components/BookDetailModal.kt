@@ -580,9 +580,26 @@ fun BookDetailModal(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = if (readingProgress != null) "ဆက်လက်ဖတ်ရှုမည် (${readingProgress.displayPageText})" else "တိုက်ရိုက် ဖတ်ရှုမည် (ဒေါင်းလုဒ်လုပ်ရန်မလိုပါ)",
+                    text = if (readingProgress != null) "ဆက်လက်ဖတ်ရှုမည် (${readingProgress.displayPageText})" else "စာအုပ်တစ်အုပ်လုံး တိုက်ရိုက် ဖတ်ရှုမည် (အပြည့်အစုံ)",
                     fontWeight = FontWeight.Bold,
                     fontSize = 13.5.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Information note about complete full book reading
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "✓ အမှာစာ၊ အခန်း ၁ မှ ၁၂ အထိ၊ မာတိကာနှင့် အတ္ထုပ္ပတ္တိ (စာအုပ်တစ်အုပ်လုံး ၂၈ မျက်နှာ) ပြည့်စုံစွာ ဖတ်ရှုနိုင်ပါသည်",
+                    color = AmberPrimary.copy(alpha = 0.9f),
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp
                 )
             }
 

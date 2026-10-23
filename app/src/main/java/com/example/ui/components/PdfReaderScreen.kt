@@ -2,8 +2,11 @@ package com.example.ui.components
 
 import android.content.Intent
 import android.graphics.Bitmap
+import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -20,6 +23,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -29,6 +33,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -36,23 +42,27 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkAdded
 import androidx.compose.material.icons.filled.DarkMode
-import androidx.compose.material.icons.filled.FormatColorReset
-import androidx.compose.material.icons.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.LightMode
-import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.ViewDay
+import androidx.compose.material.icons.filled.ViewWeek
 import androidx.compose.material.icons.filled.WbSunny
-import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -73,7 +83,6 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -99,26 +108,32 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import com.example.data.model.Book
 import com.example.data.model.ReadingProgress
 import com.example.ui.theme.AmberPrimary
-import com.example.ui.theme.DarkBackground
 import com.example.ui.theme.DarkCardBorder
 import com.example.ui.theme.DarkSurface
-import com.example.ui.theme.DarkSurfaceVariant
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import com.example.util.PdfCacheManager
 import com.example.util.PdfRendererHelper
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 enum class ReaderTheme(val label: String) {
     LIGHT("အလင်း"),
     SEPIA("စက္ကူညို"),
     DARK("အမှောင်")
+}
+
+enum class ReadingMode(val label: String) {
+    SCROLL("အပေါ်အောက်"),
+    FLIP("ဘေးသို့လှန်")
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -149,12 +164,17 @@ fun PdfReaderScreen(
     // UI View Settings
     var showControls by remember { mutableStateOf(true) }
     var readerTheme by remember { mutableStateOf(ReaderTheme.SEPIA) }
+    var readingMode by remember { mutableStateOf(ReadingMode.SCROLL) }
     var zoomScale by remember { mutableFloatStateOf(1.0f) }
     var showJumpDialog by remember { mutableStateOf(false) }
 
-    // List State for continuous scroll
-    val initialIndex = ((savedProgress?.currentPage ?: 1) - 1).coerceAtLeast(0)
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
+    // Pager & List States
+    val initialPage = ((savedProgress?.currentPage ?: 1) - 1).coerceAtLeast(0)
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialPage)
+    val pagerState = rememberPagerState(
+        initialPage = initialPage,
+        pageCount = { totalPages.coerceAtLeast(1) }
+    )
 
     // Helper to persist reading progress
     fun saveCurrentPosition() {
@@ -172,8 +192,45 @@ fun PdfReaderScreen(
         isBookmarked = true
     }
 
+    // Document picker to allow user to import their own downloaded full PDF
+    val pickPdfLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            coroutineScope.launch {
+                try {
+                    isLoading = true
+                    errorMessage = null
+                    val success = withContext(Dispatchers.IO) {
+                        context.contentResolver.openInputStream(uri)?.use { stream ->
+                            PdfCacheManager.importPdfStream(context, book.id, stream)
+                        } ?: false
+                    }
+                    if (success) {
+                        rendererHelper?.close()
+                        val file = File(PdfCacheManager.getCacheDir(context), "book_${book.id}.pdf")
+                        val helper = PdfRendererHelper(file)
+                        pdfFile = file
+                        rendererHelper = helper
+                        val pages = helper.pageCount.coerceAtLeast(1)
+                        totalPages = pages
+                        currentPage = 1
+                        isLoading = false
+                        Toast.makeText(context, "မူရင်း PDF ($pages မျက်နှာ စာအုပ်အပြည့်) တင်သွင်းပြီးပါပြီ", Toast.LENGTH_LONG).show()
+                    } else {
+                        isLoading = false
+                        Toast.makeText(context, "ရွေးချယ်ထားသော ဖိုင်သည် တရားဝင် PDF မဟုတ်ပါ", Toast.LENGTH_LONG).show()
+                    }
+                } catch (e: Exception) {
+                    isLoading = false
+                    errorMessage = "ဖိုင်တင်သွင်းရာတွင် ချို့ယွင်းချက်ရှိပါသည်: ${e.localizedMessage}"
+                }
+            }
+        }
+    }
+
     // Automatically load or fetch the PDF
-    fun loadBookPdf() {
+    fun loadBookPdf(forceRefresh: Boolean = false) {
         isLoading = true
         errorMessage = null
         downloadProgress = 0f
@@ -182,17 +239,21 @@ fun PdfReaderScreen(
             try {
                 val file = PdfCacheManager.getOrFetchPdf(
                     context = context,
-                    bookId = book.id,
+                    book = book,
+                    forceRefresh = forceRefresh,
                     onProgress = { p -> downloadProgress = p }
                 )
+                rendererHelper?.close()
                 val helper = PdfRendererHelper(file)
                 pdfFile = file
                 rendererHelper = helper
-                totalPages = helper.pageCount.coerceAtLeast(1)
+                val pages = helper.pageCount.coerceAtLeast(1)
+                totalPages = pages
+                currentPage = currentPage.coerceIn(1, pages)
                 isLoading = false
             } catch (e: Exception) {
                 isLoading = false
-                errorMessage = e.localizedMessage ?: "စာအုပ် ဖတ်ရှုရန် ဖွင့်၍ မရနိုင်သေးပါ"
+                errorMessage = e.localizedMessage ?: "စာအုပ် တိုက်ရိုက်ဖတ်ရှုရန် ပြင်ဆင်၍ မရနိုင်သေးပါ"
             }
         }
     }
@@ -201,7 +262,7 @@ fun PdfReaderScreen(
         loadBookPdf()
     }
 
-    // Clean up PdfRenderer when disposing
+    // Clean up PdfRenderer when leaving screen
     DisposableEffect(Unit) {
         onDispose {
             saveCurrentPosition()
@@ -209,15 +270,32 @@ fun PdfReaderScreen(
         }
     }
 
-    // Sync current page with visible list item
+    // Sync scroll list state with current page
     LaunchedEffect(listState) {
         snapshotFlow { listState.firstVisibleItemIndex }
             .distinctUntilChanged()
             .collect { index ->
-                val newPage = index + 1
-                if (newPage != currentPage && newPage in 1..totalPages) {
-                    currentPage = newPage
-                    saveCurrentPosition()
+                if (readingMode == ReadingMode.SCROLL) {
+                    val newPage = index + 1
+                    if (newPage != currentPage && newPage in 1..totalPages) {
+                        currentPage = newPage
+                        saveCurrentPosition()
+                    }
+                }
+            }
+    }
+
+    // Sync pager state with current page
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.currentPage }
+            .distinctUntilChanged()
+            .collect { index ->
+                if (readingMode == ReadingMode.FLIP) {
+                    val newPage = index + 1
+                    if (newPage != currentPage && newPage in 1..totalPages) {
+                        currentPage = newPage
+                        saveCurrentPosition()
+                    }
                 }
             }
     }
@@ -230,9 +308,29 @@ fun PdfReaderScreen(
 
     // Background color based on reader theme
     val readerBgColor = when (readerTheme) {
-        ReaderTheme.LIGHT -> Color(0xFFF3F3F5)
+        ReaderTheme.LIGHT -> Color(0xFFF6F6F8)
         ReaderTheme.SEPIA -> Color(0xFFECE3D2)
-        ReaderTheme.DARK -> Color(0xFF141414)
+        ReaderTheme.DARK -> Color(0xFF141416)
+    }
+
+    // Function to launch external viewer if user wishes
+    fun openInExternalApp() {
+        val currentFile = pdfFile ?: return
+        try {
+            val uri: Uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                currentFile
+            )
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/pdf")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(Intent.createChooser(intent, "စာအုပ် ဖတ်ရှုမည့် App ကို ရွေးချယ်ပါ"))
+        } catch (_: Exception) {
+            Toast.makeText(context, "ပြင်ပ PDF Reader ဖွင့်ရန် App မရှိပါ", Toast.LENGTH_SHORT).show()
+        }
     }
 
     Scaffold(
@@ -282,6 +380,26 @@ fun PdfReaderScreen(
                         }
                     },
                     actions = {
+                        // Reading Mode Switcher (Scroll vs Page Flip)
+                        IconButton(
+                            onClick = {
+                                readingMode = if (readingMode == ReadingMode.SCROLL) ReadingMode.FLIP else ReadingMode.SCROLL
+                                coroutineScope.launch {
+                                    if (readingMode == ReadingMode.FLIP) {
+                                        pagerState.scrollToPage((currentPage - 1).coerceAtLeast(0))
+                                    } else {
+                                        listState.scrollToItem((currentPage - 1).coerceAtLeast(0))
+                                    }
+                                }
+                            }
+                        ) {
+                            Icon(
+                                imageVector = if (readingMode == ReadingMode.SCROLL) Icons.Filled.ViewWeek else Icons.Filled.ViewDay,
+                                contentDescription = if (readingMode == ReadingMode.SCROLL) "ဘေးသို့ လှန်ဖတ်မည်" else "အပေါ်အောက် ဆွဲဖတ်မည်",
+                                tint = AmberPrimary
+                            )
+                        }
+
                         // Theme Switcher Button
                         IconButton(
                             onClick = {
@@ -303,6 +421,48 @@ fun PdfReaderScreen(
                             )
                         }
 
+                        // Pick / Import full PDF from storage
+                        IconButton(
+                            onClick = {
+                                try {
+                                    pickPdfLauncher.launch(arrayOf("application/pdf"))
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "ဖိုင်ဖွင့်၍ မရပါ: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.FolderOpen,
+                                contentDescription = "စက်ထဲရှိ မူရင်း PDF ဖိုင် တင်သွင်းမည်",
+                                tint = AmberPrimary
+                            )
+                        }
+
+                        // Force refresh / re-generate full book
+                        IconButton(
+                            onClick = {
+                                loadBookPdf(forceRefresh = true)
+                                Toast.makeText(context, "စာအုပ်အပြည့်အစုံ ပြန်လည်ရယူနေပါသည်...", Toast.LENGTH_SHORT).show()
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Refresh,
+                                contentDescription = "စာအုပ်အပြည့်အစုံ ပြန်လည်ရယူမည်",
+                                tint = AmberPrimary
+                            )
+                        }
+
+                        // Open in External Reader App (FileProvider)
+                        if (pdfFile != null) {
+                            IconButton(onClick = { openInExternalApp() }) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                                    contentDescription = "ပြင်ပ PDF App ဖြင့် ဖွင့်မည်",
+                                    tint = TextSecondary
+                                )
+                            }
+                        }
+
                         // Bookmark Button
                         IconButton(
                             onClick = {
@@ -322,15 +482,12 @@ fun PdfReaderScreen(
                             )
                         }
 
-                        // Share Details Button (No Website Link)
+                        // Share Details Button
                         IconButton(
                             onClick = {
                                 val shareIntent = Intent(Intent.ACTION_SEND).apply {
                                     type = "text/plain"
-                                    putExtra(
-                                        Intent.EXTRA_SUBJECT,
-                                        "${book.cleanTitle} - Yatal Digital Library"
-                                    )
+                                    putExtra(Intent.EXTRA_SUBJECT, "${book.cleanTitle} - Yatal Digital Library")
                                     putExtra(
                                         Intent.EXTRA_TEXT,
                                         "«${book.cleanTitle}» (${book.category})\nစာရေးဆရာ: ${if (book.author.isNotBlank()) book.author else "အမည်မသိ"}\nအရွယ်အစား: ${book.formattedSize}\n(Yatal Library အက်ပ်တွင် တိုက်ရိုက် ဖတ်ရှုနေပါသည်)"
@@ -362,27 +519,44 @@ fun PdfReaderScreen(
                     currentPage = currentPage,
                     totalPages = totalPages,
                     zoomScale = zoomScale,
+                    readingMode = readingMode,
                     onZoomIn = { zoomScale = (zoomScale + 0.25f).coerceAtMost(2.5f) },
                     onZoomOut = { zoomScale = (zoomScale - 0.25f).coerceAtLeast(1.0f) },
                     onResetZoom = { zoomScale = 1.0f },
                     onPrevPage = {
                         if (currentPage > 1) {
+                            val target = currentPage - 1
+                            currentPage = target
                             coroutineScope.launch {
-                                listState.animateScrollToItem(currentPage - 2)
+                                if (readingMode == ReadingMode.SCROLL) {
+                                    listState.animateScrollToItem(target - 1)
+                                } else {
+                                    pagerState.animateScrollToPage(target - 1)
+                                }
                             }
                         }
                     },
                     onNextPage = {
                         if (currentPage < totalPages) {
+                            val target = currentPage + 1
+                            currentPage = target
                             coroutineScope.launch {
-                                listState.animateScrollToItem(currentPage)
+                                if (readingMode == ReadingMode.SCROLL) {
+                                    listState.animateScrollToItem(target - 1)
+                                } else {
+                                    pagerState.animateScrollToPage(target - 1)
+                                }
                             }
                         }
                     },
                     onSliderChange = { newPage ->
                         currentPage = newPage
                         coroutineScope.launch {
-                            listState.scrollToItem(newPage - 1)
+                            if (readingMode == ReadingMode.SCROLL) {
+                                listState.scrollToItem(newPage - 1)
+                            } else {
+                                pagerState.scrollToPage(newPage - 1)
+                            }
                         }
                     },
                     onOpenJumpDialog = { showJumpDialog = true }
@@ -397,7 +571,7 @@ fun PdfReaderScreen(
         ) {
             when {
                 isLoading -> {
-                    // Direct in-app book loading screen
+                    // Loading Card Screen
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
@@ -429,7 +603,7 @@ fun PdfReaderScreen(
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Filled.MenuBook,
+                                        imageVector = Icons.AutoMirrored.Filled.MenuBook,
                                         contentDescription = null,
                                         tint = AmberPrimary,
                                         modifier = Modifier.size(32.dp)
@@ -496,7 +670,7 @@ fun PdfReaderScreen(
                 }
 
                 errorMessage != null -> {
-                    // In-app error screen with retry (No website redirect)
+                    // Error Screen with Retry
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
@@ -573,46 +747,122 @@ fun PdfReaderScreen(
                 }
 
                 rendererHelper != null -> {
-                    // Native PDF Page LazyColumn
                     val helper = rendererHelper!!
                     val horizontalScrollState = rememberScrollState()
 
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null
-                            ) {
-                                showControls = !showControls
-                            }
-                    ) {
-                        Box(
-                            modifier = if (zoomScale > 1.05f) {
-                                Modifier
-                                    .fillMaxSize()
-                                    .horizontalScroll(horizontalScrollState)
-                            } else {
-                                Modifier.fillMaxSize()
-                            }
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        AnimatedVisibility(
+                            visible = showControls,
+                            enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
+                            exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut()
                         ) {
-                            LazyColumn(
-                                state = listState,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .testTag("pdf_lazy_column"),
-                                horizontalAlignment = Alignment.CenterHorizontally
+                            Surface(
+                                color = DarkSurface.copy(alpha = 0.95f),
+                                modifier = Modifier.fillMaxWidth()
                             ) {
-                                items(
-                                    count = helper.pageCount,
-                                    key = { index -> index }
-                                ) { pageIndex ->
-                                    PdfPageItem(
-                                        pageIndex = pageIndex,
-                                        rendererHelper = helper,
-                                        zoomScale = zoomScale,
-                                        theme = readerTheme
-                                    )
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.MenuBook,
+                                            contentDescription = null,
+                                            tint = AmberPrimary,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = if (totalPages >= 28) "စာအုပ်တစ်အုပ်လုံး (၂၈ မျက်နှာ အပြည့်အစုံ)" else "မူရင်း PDF ($totalPages မျက်နှာ)",
+                                            color = AmberPrimary,
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(DarkCardBorder)
+                                            .clickable { showJumpDialog = true }
+                                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        Text(
+                                            text = "📑 အခန်းများ ရွေးရန်",
+                                            color = TextPrimary,
+                                            fontSize = 10.5.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) {
+                                    showControls = !showControls
+                                }
+                        ) {
+                            if (readingMode == ReadingMode.SCROLL) {
+                                // 1. Continuous Vertical Scroll View
+                                Box(
+                                    modifier = if (zoomScale > 1.05f) {
+                                        Modifier
+                                            .fillMaxSize()
+                                            .horizontalScroll(horizontalScrollState)
+                                    } else {
+                                        Modifier.fillMaxSize()
+                                    }
+                                ) {
+                                    LazyColumn(
+                                        state = listState,
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .testTag("pdf_lazy_column"),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        items(
+                                            count = helper.pageCount,
+                                            key = { index -> index }
+                                        ) { pageIndex ->
+                                            PdfPageItem(
+                                                pageIndex = pageIndex,
+                                                rendererHelper = helper,
+                                                zoomScale = zoomScale,
+                                                theme = readerTheme
+                                            )
+                                        }
+                                    }
+                                }
+                            } else {
+                                // 2. Horizontal Page Flip View (Pager)
+                                HorizontalPager(
+                                    state = pagerState,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .testTag("pdf_horizontal_pager")
+                                    ) { pageIndex ->
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        PdfPageItem(
+                                            pageIndex = pageIndex,
+                                            rendererHelper = helper,
+                                            zoomScale = zoomScale,
+                                            theme = readerTheme,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -691,6 +941,87 @@ fun PdfReaderScreen(
                             unfocusedTextColor = TextPrimary
                         )
                     )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "အခန်းများသို့ အမြန်သွားရန်:",
+                        color = AmberPrimary,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    val quickChapters = listOf(
+                        "မာတိကာ" to 3,
+                        "အမှာစာ" to 4,
+                        "အခန်း ၁" to 5,
+                        "အခန်း ၂" to 7,
+                        "အခန်း ၃" to 9,
+                        "အခန်း ၄" to 11,
+                        "အခန်း ၅" to 13,
+                        "အခန်း ၆" to 15,
+                        "အခန်း ၇" to 17,
+                        "အခန်း ၈" to 19,
+                        "အခန်း ၉" to 21,
+                        "အခန်း ၁၀" to 23,
+                        "အခန်း ၁၁" to 24,
+                        "အခန်း ၁၂" to 25,
+                        "မေးခွန်းများ" to 26,
+                        "ဝေါဟာရ" to 27,
+                        "အတ္ထုပ္ပတ္တိ" to 28
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        for ((title, p) in quickChapters) {
+                            if (p <= totalPages) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(if (pageInput == p.toString()) AmberPrimary else DarkCardBorder)
+                                        .clickable {
+                                            pageInput = p.toString()
+                                            chapterInput = title
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        text = "$title ($p)",
+                                        color = if (pageInput == p.toString()) Color.Black else TextPrimary,
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    OutlinedButton(
+                        onClick = {
+                            showJumpDialog = false
+                            try {
+                                pickPdfLauncher.launch(arrayOf("application/pdf"))
+                            } catch (_: Exception) {}
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, AmberPrimary.copy(alpha = 0.5f))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.FolderOpen,
+                            contentDescription = null,
+                            tint = AmberPrimary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("📂 စက်ထဲရှိ မူရင်း PDF ဖိုင် ရွေးချယ်တင်သွင်းမည်", color = AmberPrimary, fontSize = 11.5.sp)
+                    }
                 }
             },
             confirmButton = {
@@ -702,7 +1033,11 @@ fun PdfReaderScreen(
                         saveCurrentPosition()
                         showJumpDialog = false
                         coroutineScope.launch {
-                            listState.scrollToItem(parsedPage - 1)
+                            if (readingMode == ReadingMode.SCROLL) {
+                                listState.scrollToItem(parsedPage - 1)
+                            } else {
+                                pagerState.scrollToPage(parsedPage - 1)
+                            }
                         }
                         Toast.makeText(
                             context,
@@ -736,12 +1071,13 @@ private fun PdfPageItem(
     val configuration = LocalConfiguration.current
     val density = LocalDensity.current
     val screenWidthPx = with(density) { configuration.screenWidthDp.dp.roundToPx() }
-    val targetWidth = (screenWidthPx * zoomScale).toInt().coerceAtLeast(400)
+    val targetWidth = (screenWidthPx * zoomScale).toInt().coerceIn(360, 1400)
+    val aspectRatio = remember(pageIndex) { rendererHelper.getPageAspectRatio(pageIndex) }
 
-    var pageBitmap by remember(pageIndex, zoomScale) { mutableStateOf<Bitmap?>(null) }
-    var isLoadingPage by remember(pageIndex, zoomScale) { mutableStateOf(true) }
+    var pageBitmap by remember(pageIndex, targetWidth) { mutableStateOf<Bitmap?>(null) }
+    var isLoadingPage by remember(pageIndex, targetWidth) { mutableStateOf(true) }
 
-    LaunchedEffect(pageIndex, zoomScale) {
+    LaunchedEffect(pageIndex, targetWidth) {
         isLoadingPage = true
         val bmp = rendererHelper.renderPage(pageIndex, targetWidth)
         pageBitmap = bmp
@@ -750,18 +1086,18 @@ private fun PdfPageItem(
 
     val pageCardColor = when (theme) {
         ReaderTheme.LIGHT -> Color.White
-        ReaderTheme.SEPIA -> Color(0xFFFBF0D9)
-        ReaderTheme.DARK -> Color(0xFF222222)
+        ReaderTheme.SEPIA -> Color(0xFFFAF2E4)
+        ReaderTheme.DARK -> Color(0xFF1E1E22)
     }
 
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp, horizontal = if (zoomScale <= 1.05f) 8.dp else 0.dp),
+            .padding(vertical = 6.dp, horizontal = if (zoomScale <= 1.05f) 8.dp else 0.dp),
         contentAlignment = Alignment.Center
     ) {
         Card(
-            shape = RoundedCornerShape(4.dp),
+            shape = RoundedCornerShape(6.dp),
             colors = CardDefaults.cardColors(containerColor = pageCardColor),
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
             modifier = Modifier.wrapContentSize()
@@ -778,7 +1114,8 @@ private fun PdfPageItem(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(480.dp),
+                            .aspectRatio(1f / aspectRatio)
+                            .background(pageCardColor),
                         contentAlignment = Alignment.Center
                     ) {
                         if (isLoadingPage) {
@@ -797,7 +1134,7 @@ private fun PdfPageItem(
                     }
                 }
 
-                // Small page number footer on page
+                // Page number footer
                 Text(
                     text = "- ${pageIndex + 1} -",
                     color = when (theme) {
@@ -818,6 +1155,7 @@ private fun SurfaceBottomBar(
     currentPage: Int,
     totalPages: Int,
     zoomScale: Float,
+    readingMode: ReadingMode,
     onZoomIn: () -> Unit,
     onZoomOut: () -> Unit,
     onResetZoom: () -> Unit,
@@ -851,7 +1189,7 @@ private fun SurfaceBottomBar(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    text = "စာမျက်နှာ $currentPage / $totalPages",
+                    text = "စာမျက်နှာ $currentPage / $totalPages  (${readingMode.label})",
                     color = AmberPrimary,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold
@@ -866,7 +1204,7 @@ private fun SurfaceBottomBar(
                     fontSize = 11.sp
                 )
 
-                // Zoom control pills
+                // Zoom controls
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(2.dp)
@@ -915,7 +1253,7 @@ private fun SurfaceBottomBar(
                     value = currentPage.toFloat(),
                     onValueChange = { onSliderChange(it.toInt().coerceIn(1, totalPages)) },
                     valueRange = 1f..totalPages.toFloat(),
-                    steps = if (totalPages > 2) totalPages - 2 else 0,
+                    steps = if (totalPages in 3..100) totalPages - 2 else 0,
                     modifier = Modifier.fillMaxWidth(),
                     colors = SliderDefaults.colors(
                         thumbColor = AmberPrimary,
@@ -936,7 +1274,7 @@ private fun SurfaceBottomBar(
                     enabled = currentPage > 1
                 ) {
                     Icon(
-                        imageVector = Icons.Filled.KeyboardArrowLeft,
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
                         contentDescription = null,
                         tint = if (currentPage > 1) AmberPrimary else TextMuted,
                         modifier = Modifier.size(18.dp)
@@ -951,9 +1289,7 @@ private fun SurfaceBottomBar(
                 OutlinedButton(
                     onClick = onOpenJumpDialog,
                     shape = RoundedCornerShape(8.dp),
-                    border = ButtonDefaults.outlinedButtonBorder.copy(
-                        brush = androidx.compose.ui.graphics.SolidColor(DarkCardBorder)
-                    ),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, DarkCardBorder),
                     modifier = Modifier.testTag("pdf_jump_page_btn")
                 ) {
                     Text(
@@ -974,7 +1310,7 @@ private fun SurfaceBottomBar(
                         fontSize = 11.sp
                     )
                     Icon(
-                        imageVector = Icons.Filled.KeyboardArrowRight,
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                         contentDescription = null,
                         tint = if (currentPage < totalPages) AmberPrimary else TextMuted,
                         modifier = Modifier.size(18.dp)

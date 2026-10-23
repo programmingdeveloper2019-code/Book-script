@@ -27,12 +27,36 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import com.example.data.local.LocalBookDao
+import com.example.data.local.LocalBookEntity
 import kotlinx.coroutines.withContext
 
 class BookRepository(
     private val apiService: YatalApiService,
-    private val bookDao: BookDao
+    private val bookDao: BookDao,
+    private val localBookDao: LocalBookDao? = null
 ) {
+
+    val allLocalBooks: Flow<List<LocalBookEntity>> = localBookDao?.getAllBooks() ?: kotlinx.coroutines.flow.emptyFlow()
+
+    suspend fun insertLocalBook(book: LocalBookEntity): Long = withContext(Dispatchers.IO) {
+        localBookDao?.insertBook(book) ?: 0L
+    }
+
+    suspend fun updateLocalBook(book: LocalBookEntity) = withContext(Dispatchers.IO) {
+        localBookDao?.updateBook(book)
+    }
+
+    suspend fun deleteLocalBook(id: Long) = withContext(Dispatchers.IO) {
+        localBookDao?.deleteBookById(id)
+    }
+
+    suspend fun getLocalBookByFilePath(filePath: String): LocalBookEntity? = withContext(Dispatchers.IO) {
+        localBookDao?.getBookByLocalFilePath(filePath)
+    }
+
+    fun searchLocalBooks(query: String): Flow<List<LocalBookEntity>> =
+        localBookDao?.searchBooks(query) ?: kotlinx.coroutines.flow.emptyFlow()
 
     val allFavorites: Flow<List<Book>> = bookDao.getAllFavorites().map { list ->
         list.map { it.toBook() }
@@ -140,6 +164,8 @@ class BookRepository(
                         rawCategory = dto.rawCategory,
                         title = dto.title,
                         author = extracted.author,
+                        synopsis = dto.synopsis ?: "",
+                        publicationDate = dto.publicationDate ?: "",
                         rawFilename = dto.rawFilename,
                         size = dto.size,
                         genre = resolvedGenre
@@ -433,7 +459,7 @@ class BookRepository(
             return INSTANCE ?: synchronized(this) {
                 val db = AppDatabase.getDatabase(context)
                 val api = YatalApiService.create()
-                val repo = BookRepository(api, db.bookDao())
+                val repo = BookRepository(api, db.bookDao(), db.localBookDao())
                 INSTANCE = repo
                 repo
             }

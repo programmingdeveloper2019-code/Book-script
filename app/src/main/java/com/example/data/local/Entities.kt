@@ -12,15 +12,17 @@ import com.example.data.model.resolveGenre
 
 @Entity(tableName = "cached_books")
 data class BookEntity(
-    @PrimaryKey val id: Long,
-    val category: String,
-    val rawCategory: String?,
-    val title: String,
+    @PrimaryKey val id: Long = 0L,
+    val category: String = "General",
+    val rawCategory: String? = null,
+    val title: String = "",
     val author: String = "",
     val synopsis: String = "",
+    val description: String = synopsis,
     val publicationDate: String = "",
-    val rawFilename: String?,
-    val size: Long,
+    val rawFilename: String? = null,
+    val localFilePath: String = "",
+    val size: Long = 0L,
     val genre: String = "General",
     val cachedAt: Long = System.currentTimeMillis()
 )
@@ -227,3 +229,39 @@ fun ReadingProgress.toEntity(): ReadingProgressEntity {
         lastReadAt = this.lastReadAt
     )
 }
+
+fun LocalBookEntity.toBook(): Book {
+    val clean = cleanBookTitle(this.title)
+    return Book(
+        id = this.id,
+        category = "Local",
+        rawCategory = "Local",
+        title = this.title,
+        cleanTitle = clean,
+        author = this.author,
+        synopsis = this.description,
+        publicationDate = "",
+        rawFilename = this.localFilePath.substringAfterLast('/'),
+        size = this.fileSize,
+        formattedSize = formatBytes(this.fileSize),
+        genre = "General",
+        jacketIndex = (kotlin.math.abs(this.id) % 6).toInt(),
+        previewUrl = "",
+        downloadUrl = "",
+        webUrl = "",
+        isFavorite = false
+    )
+}
+
+fun Book.toLocalBookEntity(localFilePath: String = ""): LocalBookEntity {
+    return LocalBookEntity(
+        id = this.id,
+        title = this.title,
+        author = this.author,
+        description = if (this.synopsis.isNotBlank()) this.synopsis else this.cleanTitle,
+        localFilePath = localFilePath,
+        fileSize = this.size,
+        createdAt = System.currentTimeMillis()
+    )
+}
+
