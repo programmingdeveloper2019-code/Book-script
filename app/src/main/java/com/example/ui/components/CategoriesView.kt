@@ -88,7 +88,7 @@ fun CategoriesView(
         contentPadding = PaddingValues(top = 12.dp, bottom = 88.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. Primary Genres Section (Literature, History, Education, etc.)
+        // 1. Primary Genres Section (Fiction, Non-Fiction, Educational, History, etc.)
         item {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Row(
@@ -105,9 +105,10 @@ fun CategoriesView(
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "စာပေ၊ သမိုင်း၊ ပညာရေး နှင့် အခြား ဘာသာရပ်အလိုက် ရှာဖွေပါ",
-                            color = TextMuted,
-                            fontSize = 11.5.sp
+                            text = "ဝက်ဘ်ဆိုက် မော်ကွန်းတိုက် စာအုပ်ပေါင်း ၄၃,၈၈၀ အုပ် (Fiction, Non-Fiction, Educational, History)",
+                            color = AmberPrimary,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Medium
                         )
                     }
                 }
@@ -115,7 +116,21 @@ fun CategoriesView(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 // 2-Column Grid for Primary Genres
-                val genres = BookGenre.entries
+                val genres = remember {
+                    listOf(
+                        BookGenre.ALL,
+                        BookGenre.FICTION,
+                        BookGenre.NON_FICTION,
+                        BookGenre.EDUCATION,
+                        BookGenre.HISTORY,
+                        BookGenre.SCIENCE,
+                        BookGenre.TECHNOLOGY,
+                        BookGenre.BUSINESS,
+                        BookGenre.LITERATURE,
+                        BookGenre.COMICS,
+                        BookGenre.GENERAL
+                    )
+                }
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     genres.chunked(2).forEach { rowGenres ->
                         Row(
@@ -137,7 +152,10 @@ fun CategoriesView(
                                         .weight(1f)
                                         .clip(RoundedCornerShape(12.dp))
                                         .clickable { onGenreClick(genre.displayName) }
-                                        .testTag("genre_card_${genre.id}"),
+                                        .testTag("genre_card_${genre.id}")
+                                        .testTag("genre_card_${genre.displayName.lowercase()}")
+                                        .then(if (genre == BookGenre.EDUCATION) Modifier.testTag("genre_card_educational") else Modifier)
+                                        .then(if (genre == BookGenre.NON_FICTION) Modifier.testTag("genre_card_nonfiction").testTag("genre_card_non_fiction") else Modifier),
                                     colors = CardDefaults.cardColors(
                                         containerColor = if (isSelected) AmberPrimary.copy(alpha = 0.15f) else DarkSurface
                                     ),

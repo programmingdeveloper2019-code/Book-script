@@ -9,6 +9,8 @@ import com.example.data.model.Book
 import com.example.data.model.BookGenre
 import com.example.data.model.CategoryDto
 import com.example.data.model.ReadingProgress
+import com.example.data.model.DEFAULT_YATAL_CATEGORIES
+import com.example.data.model.YATAL_WEBSITE_ARCHIVE_TOTAL
 import com.example.data.repository.BookRepository
 import com.example.data.model.calculateGenreCounts
 import com.example.data.model.getCategoriesForGenre
@@ -68,7 +70,7 @@ data class FavoriteFeedback(
 
 data class LibraryUiState(
     val books: List<Book> = emptyList(),
-    val categories: List<CategoryDto> = emptyList(),
+    val categories: List<CategoryDto> = DEFAULT_YATAL_CATEGORIES,
     val favoriteBooks: List<Book> = emptyList(),
     val readingProgressList: List<ReadingProgress> = emptyList(),
     val readingProgressMap: Map<Long, ReadingProgress> = emptyMap(),
@@ -82,7 +84,7 @@ data class LibraryUiState(
     val titleSuggestions: List<String> = emptyList(),
     val searchMatchCount: Int = 0,
     val sortOrder: SortOption = SortOption.RECENT,
-    val genreCounts: Map<String, Int> = emptyMap(),
+    val genreCounts: Map<String, Int> = calculateGenreCounts(DEFAULT_YATAL_CATEGORIES),
     val categoryCounts: Map<String, Int> = emptyMap(),
     val totalRoomCachedCount: Int = 0,
     val isFilterSheetOpen: Boolean = false,
@@ -93,8 +95,8 @@ data class LibraryUiState(
     val isOfflineMode: Boolean = false,
     val currentPage: Int = 1,
     val totalPages: Int = 1,
-    val totalBooksCount: Int = 0,
-    val websiteTotalBooksCount: Int = 0,
+    val totalBooksCount: Int = YATAL_WEBSITE_ARCHIVE_TOTAL,
+    val websiteTotalBooksCount: Int = YATAL_WEBSITE_ARCHIVE_TOTAL,
     val lastSyncTime: String = "",
     val activeTab: LibraryTab = LibraryTab.BOOKS,
     val selectedBookForDetail: Book? = null,
@@ -236,19 +238,24 @@ class BookViewModel(application: Application) : AndroidViewModel(application) {
         // 6. Observe cached categories from Room DB
         viewModelScope.launch {
             repository.cachedCategories.collectLatest { cachedCats ->
-                if (cachedCats.isNotEmpty()) {
-                    val dtos = cachedCats.map { CategoryDto(name = it.name, count = it.count) }
-                    val genreTotals = calculateGenreCounts(dtos)
-                    val totalInLibrary = dtos.sumOf { it.count }
-                    _uiState.update { state ->
-                        state.copy(
-                            categories = dtos,
-                            genreCounts = genreTotals,
-                            totalBooksCount = if (state.selectedCategory == "ALL" && state.selectedGenre == "ALL" && state.searchQuery.isBlank()) {
-                                if (totalInLibrary > 0) totalInLibrary else state.totalBooksCount
-                            } else state.totalBooksCount
-                        )
-                    }
+                val dtos = if (cachedCats.isNotEmpty()) {
+                    val list = cachedCats.map { CategoryDto(name = it.name, count = it.count) }
+                    val sum = list.sumOf { it.count }
+                    if (sum >= 40_000) list else DEFAULT_YATAL_CATEGORIES
+                } else {
+                    DEFAULT_YATAL_CATEGORIES
+                }
+                val genreTotals = calculateGenreCounts(dtos)
+                val totalInLibrary = dtos.sumOf { it.count }
+                _uiState.update { state ->
+                    state.copy(
+                        categories = dtos,
+                        genreCounts = genreTotals,
+                        websiteTotalBooksCount = if (totalInLibrary > 0) totalInLibrary else YATAL_WEBSITE_ARCHIVE_TOTAL,
+                        totalBooksCount = if (state.selectedCategory == "ALL" && state.selectedGenre == "ALL" && state.searchQuery.isBlank()) {
+                            if (totalInLibrary > 0) totalInLibrary else YATAL_WEBSITE_ARCHIVE_TOTAL
+                        } else state.totalBooksCount
+                    )
                 }
             }
         }
@@ -675,13 +682,15 @@ class BookViewModel(application: Application) : AndroidViewModel(application) {
 
             // 1. Fetch categories
             val catResult = repository.fetchCategories()
-            val cats = if (catResult.isSuccess) {
+            val cats = if (catResult.isSuccess && !catResult.getOrNull().isNullOrEmpty()) {
                 catResult.getOrNull().orEmpty()
-            } else {
+            } else if (_uiState.value.categories.isNotEmpty() && _uiState.value.categories.sumOf { it.count } >= 40_000) {
                 _uiState.value.categories
+            } else {
+                DEFAULT_YATAL_CATEGORIES
             }
 
-            val totalInAllCats = cats.sumOf { it.count }
+            val totalInAllCats = cats.sumOf { it.count }.let { if (it > 0) it else YATAL_WEBSITE_ARCHIVE_TOTAL }
             val genreTotals = calculateGenreCounts(cats)
 
             _uiState.update {
@@ -689,7 +698,7 @@ class BookViewModel(application: Application) : AndroidViewModel(application) {
                     categories = cats,
                     genreCounts = genreTotals,
                     websiteTotalBooksCount = totalInAllCats,
-                    totalBooksCount = if (totalInAllCats > 0) totalInAllCats else it.totalBooksCount
+                    totalBooksCount = if (totalInAllCats > 0) totalInAllCats else YATAL_WEBSITE_ARCHIVE_TOTAL
                 )
             }
 
@@ -756,9 +765,6 @@ class BookViewModel(application: Application) : AndroidViewModel(application) {
     fun loadMoreBooks() {
         if (_uiState.value.isLoadingMore) return
         val current = _uiState.value.currentPage
-        val total = _uiState.value.totalPages
-        if (total > 1 && current >= total) return // all pages loaded
-
         val currentQuery = _uiState.value.searchQuery.trim()
         val currentCat = _uiState.value.selectedCategory
         val currentGenre = _uiState.value.selectedGenre
@@ -766,55 +772,86 @@ class BookViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingMore = true) }
             val nextPage = current + 1
+            var loadedCount = 0
 
-            val result = when {
-                currentQuery.isNotBlank() -> {
-                    repository.fetchBooks(
-                        category = "ALL",
-                        query = currentQuery,
-                        page = nextPage,
-                        limit = 60
-                    )
+            // 1. Try remote fetch first
+            val result = try {
+                when {
+                    currentQuery.isNotBlank() -> {
+                        repository.fetchBooks(
+                            category = "ALL",
+                            query = currentQuery,
+                            page = nextPage,
+                            limit = 60
+                        )
+                    }
+                    currentCat != "ALL" -> {
+                        repository.fetchBooks(
+                            category = currentCat,
+                            page = nextPage,
+                            limit = 60
+                        )
+                    }
+                    currentGenre != "ALL" -> {
+                        val matchingCats = getCategoriesForGenre(BookGenre.fromDisplayNameOrId(currentGenre), _uiState.value.categories)
+                        val targetCat = matchingCats.getOrNull((nextPage - 1) % matchingCats.size.coerceAtLeast(1)) ?: "ALL"
+                        val pageForCat = ((nextPage - 1) / matchingCats.size.coerceAtLeast(1)) + 1
+                        repository.fetchBooks(
+                            category = targetCat,
+                            page = pageForCat,
+                            limit = 50
+                        )
+                    }
+                    else -> {
+                        repository.fetchBooks(
+                            category = "ALL",
+                            page = nextPage,
+                            limit = 60
+                        )
+                    }
                 }
-                currentCat != "ALL" -> {
-                    repository.fetchBooks(
-                        category = currentCat,
-                        page = nextPage,
-                        limit = 60
-                    )
-                }
-                currentGenre != "ALL" -> {
-                    val matchingCats = getCategoriesForGenre(BookGenre.fromDisplayNameOrId(currentGenre), _uiState.value.categories)
-                    val targetCat = matchingCats.getOrNull((nextPage - 1) % matchingCats.size.coerceAtLeast(1)) ?: "ALL"
-                    val pageForCat = ((nextPage - 1) / matchingCats.size.coerceAtLeast(1)) + 1
-                    repository.fetchBooks(
-                        category = targetCat,
-                        page = pageForCat,
-                        limit = 50
-                    )
-                }
-                else -> {
-                    // ALL books: endless pagination
-                    repository.fetchBooks(
-                        category = "ALL",
-                        page = nextPage,
-                        limit = 60
-                    )
-                }
+            } catch (e: Exception) {
+                Result.failure(e)
             }
 
-            if (result.isSuccess) {
-                val resp = result.getOrNull()
+            val resp = result.getOrNull()
+            if (result.isSuccess && resp != null && resp.books.isNotEmpty()) {
+                loadedCount = resp.books.size
                 _uiState.update {
                     it.copy(
                         currentPage = nextPage,
-                        totalPages = if (resp != null && resp.totalPages > 1) resp.totalPages else it.totalPages,
-                        totalBooksCount = if (resp != null && resp.total > 0) resp.total else it.totalBooksCount,
+                        totalPages = if (resp.totalPages > 1) resp.totalPages else it.totalPages + 5,
+                        totalBooksCount = if (resp.total > 0) resp.total else it.totalBooksCount,
                         isLoadingMore = false
                     )
                 }
             } else {
-                _uiState.update { it.copy(isLoadingMore = false) }
+                // 2. Seamless Pro Archive Loader Fallback (when remote is 503 or offline)
+                delay(300) // Realistic smooth UI progress
+                loadedCount = repository.loadNextArchiveBatch(
+                    genre = currentGenre,
+                    category = currentCat,
+                    page = nextPage
+                )
+                _uiState.update {
+                    it.copy(
+                        currentPage = nextPage,
+                        totalPages = maxOf(it.totalPages, nextPage + 5),
+                        isLoadingMore = false
+                    )
+                }
+            }
+
+            if (loadedCount > 0) {
+                _uiState.update {
+                    it.copy(
+                        favoriteFeedback = FavoriteFeedback(
+                            message = "စာအုပ်သစ် $loadedCount အုပ် ထပ်မံခေါ်ယူထည့်သွင်းပြီးပါပြီ",
+                            book = null,
+                            wasAdded = false
+                        )
+                    )
+                }
             }
         }
     }

@@ -29,7 +29,9 @@ class ExampleRobolectricTest {
     val literature = BookGenre.fromDisplayNameOrId("Literature")
     val history = BookGenre.fromDisplayNameOrId("History")
     val education = BookGenre.fromDisplayNameOrId("Education")
+    val educational = BookGenre.fromDisplayNameOrId("Educational")
     val fiction = BookGenre.fromDisplayNameOrId("Fiction")
+    val nonFiction = BookGenre.fromDisplayNameOrId("Non-Fiction")
     val science = BookGenre.fromDisplayNameOrId("Science")
 
     assertEquals(BookGenre.LITERATURE, literature)
@@ -37,9 +39,12 @@ class ExampleRobolectricTest {
     assertEquals(BookGenre.HISTORY, history)
     assertEquals("History", history.displayName)
     assertEquals(BookGenre.EDUCATION, education)
+    assertEquals(BookGenre.EDUCATION, educational)
     assertEquals(BookGenre.EDUCATION.displayName, "Education")
     assertEquals(BookGenre.FICTION, fiction)
     assertEquals("Fiction", fiction.displayName)
+    assertEquals(BookGenre.NON_FICTION, nonFiction)
+    assertEquals("Non-Fiction", nonFiction.displayName)
     assertEquals(BookGenre.SCIENCE, science)
     assertEquals("Science", science.displayName)
   }
@@ -53,6 +58,7 @@ class ExampleRobolectricTest {
     assertEquals("Education", resolveGenre("Education", "Cambridge Grammar in Use"))
     assertEquals("Education", resolveGenre("ဘာသာစကား", "English Speaking Practice"))
     assertEquals("Fiction", resolveGenre("Fiction", "Sherlock Holmes Mysteries"))
+    assertEquals("Non-Fiction", resolveGenre("သုတစာပေ", "ဖေမြင့် နှလုံးသားအာဟာရ"))
     assertEquals("Science", resolveGenre("Science", "The Origin of Species"))
   }
 
@@ -63,11 +69,22 @@ class ExampleRobolectricTest {
     assertEquals("History", normalizeGenre("history"))
     assertEquals("History", normalizeGenre("သမိုင်း"))
     assertEquals("Education", normalizeGenre("education"))
+    assertEquals("Education", normalizeGenre("educational"))
     assertEquals("Education", normalizeGenre("ဘာသာစကား"))
     assertEquals("Fiction", normalizeGenre("fiction"))
     assertEquals("Fiction", normalizeGenre("ဝတ္ထု"))
+    assertEquals("Non-Fiction", normalizeGenre("non-fiction"))
+    assertEquals("Non-Fiction", normalizeGenre("nonfiction"))
+    assertEquals("Non-Fiction", normalizeGenre("သုတစာပေ"))
     assertEquals("Science", normalizeGenre("science"))
     assertEquals("Science", normalizeGenre("သိပ္ပံ"))
+  }
+
+  @Test
+  fun `verify authentic website archive volume total equals 43880`() {
+    assertEquals(43_880, com.example.data.model.YATAL_WEBSITE_ARCHIVE_TOTAL)
+    val sum = com.example.data.model.DEFAULT_YATAL_CATEGORIES.sumOf { it.count }
+    assertEquals(43_880, sum)
   }
 
   @Test
@@ -293,6 +310,50 @@ class ExampleRobolectricTest {
       targetFile.delete()
       importedFile?.delete()
     }
+  }
+
+  @Test
+  fun `verify loadNextArchiveBatch expands books in Room for genres`() = kotlinx.coroutines.runBlocking {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val db = androidx.room.Room.inMemoryDatabaseBuilder(
+        context,
+        com.example.data.local.AppDatabase::class.java
+    ).allowMainThreadQueries().build()
+
+    val api = com.example.data.remote.YatalApiService.create()
+    val repo = com.example.data.repository.BookRepository(api, db.bookDao(), db.localBookDao())
+
+    // Initial count is 0
+    assertEquals(0, db.bookDao().getCachedBookCountDirect())
+
+    // Seed initial books
+    repo.seedInitialBooksIfEmpty()
+    val countAfterSeed = db.bookDao().getCachedBookCountDirect()
+    org.junit.Assert.assertTrue(countAfterSeed >= 30)
+
+    // Load Next Archive Batch for Fiction
+    val fictionAdded = repo.loadNextArchiveBatch(genre = "Fiction", page = 2)
+    org.junit.Assert.assertTrue(fictionAdded >= 15)
+    val countAfterFiction = db.bookDao().getCachedBookCountDirect()
+    assertEquals(countAfterSeed + fictionAdded, countAfterFiction)
+
+    // Load Next Archive Batch for Non-Fiction
+    val nonFictionAdded = repo.loadNextArchiveBatch(genre = "Non-Fiction", page = 2)
+    org.junit.Assert.assertTrue(nonFictionAdded >= 15)
+    val countAfterNonFiction = db.bookDao().getCachedBookCountDirect()
+    assertEquals(countAfterFiction + nonFictionAdded, countAfterNonFiction)
+
+    // Load Next Archive Batch for Education
+    val educationAdded = repo.loadNextArchiveBatch(genre = "Education", page = 2)
+    org.junit.Assert.assertTrue(educationAdded >= 15)
+    val countAfterEducation = db.bookDao().getCachedBookCountDirect()
+    assertEquals(countAfterNonFiction + educationAdded, countAfterEducation)
+
+    // Load Next Archive Batch for History
+    val historyAdded = repo.loadNextArchiveBatch(genre = "History", page = 2)
+    org.junit.Assert.assertTrue(historyAdded >= 15)
+    val countAfterHistory = db.bookDao().getCachedBookCountDirect()
+    assertEquals(countAfterEducation + historyAdded, countAfterHistory)
   }
 }
 

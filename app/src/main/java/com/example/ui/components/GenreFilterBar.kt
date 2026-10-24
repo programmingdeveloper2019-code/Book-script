@@ -68,6 +68,21 @@ fun GenreFilterBar(
     modifier: Modifier = Modifier
 ) {
     val numberFormat = remember { NumberFormat.getNumberInstance(Locale.US) }
+    val displayGenres = remember {
+        listOf(
+            BookGenre.ALL,
+            BookGenre.FICTION,
+            BookGenre.NON_FICTION,
+            BookGenre.EDUCATION,
+            BookGenre.HISTORY,
+            BookGenre.SCIENCE,
+            BookGenre.TECHNOLOGY,
+            BookGenre.BUSINESS,
+            BookGenre.LITERATURE,
+            BookGenre.COMICS,
+            BookGenre.GENERAL
+        )
+    }
 
     Row(
         modifier = modifier
@@ -84,7 +99,7 @@ fun GenreFilterBar(
             contentPadding = PaddingValues(start = 16.dp, end = 8.dp)
         ) {
             items(
-                items = BookGenre.entries,
+                items = displayGenres,
                 key = { it.id }
             ) { genre ->
                 val isSelected = (genre == BookGenre.ALL && (selectedGenre.equals("ALL", ignoreCase = true) || selectedGenre.equals(BookGenre.ALL.displayName, ignoreCase = true))) ||
@@ -110,7 +125,9 @@ fun GenreFilterBar(
                         }
                     },
                     testTagId = genre.id.lowercase(),
-                    displayName = genre.displayName.lowercase()
+                    displayName = genre.displayName.lowercase(),
+                    isEducation = genre == BookGenre.EDUCATION,
+                    isNonFiction = genre == BookGenre.NON_FICTION
                 )
             }
         }
@@ -150,7 +167,9 @@ private fun GenreChip(
     isSelected: Boolean,
     onClick: () -> Unit,
     testTagId: String,
-    displayName: String
+    displayName: String,
+    isEducation: Boolean = false,
+    isNonFiction: Boolean = false
 ) {
     val backgroundColor by animateColorAsState(
         targetValue = if (isSelected) AmberPrimary else DarkSurfaceVariant,
@@ -171,6 +190,8 @@ private fun GenreChip(
             .testTag("genre_chip_$testTagId")
             .testTag("genre_chip_$displayName")
             .testTag("category_chip_$displayName")
+            .then(if (isEducation) Modifier.testTag("genre_chip_educational").testTag("category_chip_educational") else Modifier)
+            .then(if (isNonFiction) Modifier.testTag("genre_chip_nonfiction").testTag("category_chip_nonfiction").testTag("category_chip_non_fiction") else Modifier)
             .semantics {
                 contentDescription = "$title genre filter, ${if (isSelected) "selected" else "not selected"}"
                 role = Role.Tab

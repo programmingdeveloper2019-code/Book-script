@@ -413,16 +413,34 @@ private fun BooksCatalogContent(
 ) {
     val gridState = rememberLazyGridState()
 
-    val shouldLoadMore = remember {
+    val totalAvailable = remember(uiState) {
+        when {
+            uiState.searchQuery.isNotBlank() -> uiState.searchMatchCount.coerceAtLeast(uiState.books.size)
+            uiState.selectedCategory != "ALL" -> {
+                uiState.categories.find { it.name == uiState.selectedCategory }?.count
+                    ?: (if (uiState.totalBooksCount > 0) uiState.totalBooksCount else uiState.books.size)
+            }
+            uiState.selectedGenre != "ALL" -> {
+                uiState.genreCounts[uiState.selectedGenre]
+                    ?: (if (uiState.totalBooksCount > 0) uiState.totalBooksCount else uiState.books.size)
+            }
+            else -> {
+                val sumAll = uiState.categories.sumOf { it.count }
+                if (sumAll > 0) sumAll else (if (uiState.totalBooksCount > 0) uiState.totalBooksCount else uiState.books.size)
+            }
+        }
+    }
+
+    val shouldLoadMore = remember(uiState.isLoadingMore, uiState.books.size, totalAvailable) {
         derivedStateOf {
             val totalItemCount = gridState.layoutInfo.totalItemsCount
             val lastVisibleItem = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            totalItemCount > 0 && lastVisibleItem >= totalItemCount - 4
+            !uiState.isLoadingMore && totalItemCount > 0 && lastVisibleItem >= totalItemCount - 3 && totalAvailable > uiState.books.size
         }
     }
 
     LaunchedEffect(shouldLoadMore.value) {
-        if (shouldLoadMore.value) {
+        if (shouldLoadMore.value && !uiState.isLoadingMore) {
             onLoadMore()
         }
     }
@@ -497,22 +515,6 @@ private fun BooksCatalogContent(
                             .padding(horizontal = 6.dp, vertical = 4.dp)
                     )
                 }
-            }
-        }
-
-        val totalAvailable = when {
-            uiState.searchQuery.isNotBlank() -> uiState.searchMatchCount.coerceAtLeast(uiState.books.size)
-            uiState.selectedCategory != "ALL" -> {
-                uiState.categories.find { it.name == uiState.selectedCategory }?.count
-                    ?: (if (uiState.totalBooksCount > 0) uiState.totalBooksCount else uiState.books.size)
-            }
-            uiState.selectedGenre != "ALL" -> {
-                uiState.genreCounts[uiState.selectedGenre]
-                    ?: (if (uiState.totalBooksCount > 0) uiState.totalBooksCount else uiState.books.size)
-            }
-            else -> {
-                val sumAll = uiState.categories.sumOf { it.count }
-                if (sumAll > 0) sumAll else (if (uiState.totalBooksCount > 0) uiState.totalBooksCount else uiState.books.size)
             }
         }
 

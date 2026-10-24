@@ -29,8 +29,9 @@ interface BookDao {
         SELECT * FROM cached_books 
         WHERE genre = :genre 
            OR (:genre = 'Fiction' AND (genre = 'Fiction' OR genre = 'Literature' OR genre = 'ဝတ္ထု / စာပေ' OR category LIKE '%ဝတ္ထု%'))
+           OR (:genre = 'Non-Fiction' AND (genre = 'Non-Fiction' OR genre = 'သုတစာပေ' OR category LIKE '%သုတ%'))
            OR (:genre = 'Literature' AND (genre = 'Literature' OR genre = 'Fiction' OR genre = 'စာပေနှင့် ရသ'))
-           OR (:genre = 'History' AND (genre = 'History' OR genre = 'သုတနှင့် သမိုင်း'))
+           OR (:genre = 'History' AND (genre = 'History' OR genre = 'သုတနှင့် သမိုင်း' OR genre = 'သမိုင်းနှင့် ရှေးဟောင်း'))
            OR (:genre = 'Education' AND (genre = 'Education' OR genre = 'ဘာသာစကား' OR genre = 'ပညာရေးနှင့် သင်ကြားရေး'))
         ORDER BY cachedAt DESC
     """)
@@ -41,6 +42,7 @@ interface BookDao {
         WHERE (:genre = 'ALL' 
             OR genre = :genre 
             OR (:genre = 'Fiction' AND (genre = 'Fiction' OR genre = 'Literature' OR genre = 'ဝတ္ထု / စာပေ' OR category LIKE '%ဝတ္ထု%'))
+            OR (:genre = 'Non-Fiction' AND (genre = 'Non-Fiction' OR genre = 'သုတစာပေ' OR category LIKE '%သုတ%'))
             OR (:genre = 'Literature' AND (genre = 'Literature' OR genre = 'Fiction' OR genre = 'စာပေနှင့် ရသ'))
             OR (:genre = 'History' AND (genre = 'History' OR genre = 'သုတနှင့် သမိုင်း' OR genre = 'သမိုင်းနှင့် ရှေးဟောင်း'))
             OR (:genre = 'Education' AND (genre = 'Education' OR genre = 'ဘာသာစကား' OR genre = 'ပညာရေးနှင့် သင်ကြားရေး'))

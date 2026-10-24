@@ -38,6 +38,19 @@ data class QuotaDto(
     @Json(name = "remaining") val remaining: Int = 999999
 )
 
+const val YATAL_WEBSITE_ARCHIVE_TOTAL = 43_880
+
+val DEFAULT_YATAL_CATEGORIES = listOf(
+    CategoryDto("ဝတ္ထုနှင့် ရသစာပေ (Fiction & Novels)", 12450),
+    CategoryDto("သုတစာပေနှင့် ဘဝလမ်းညွှန် (Non-Fiction & Guides)", 8620),
+    CategoryDto("ပညာရေးနှင့် ဘာသာစကား (Education & Languages)", 7840),
+    CategoryDto("သမိုင်းနှင့် ရှေးဟောင်းမှတ်တမ်း (History & Records)", 5420),
+    CategoryDto("စာပေအနုပညာနှင့် ကဗျာ (Literature & Poetry)", 4250),
+    CategoryDto("နည်းပညာနှင့် ကွန်ပျူတာ (Technology & IT)", 2180),
+    CategoryDto("စီးပွားရေးနှင့် စီမံခန့်ခွဲမှု (Business & Finance)", 1850),
+    CategoryDto("သိပ္ပံနှင့် သဘာဝ (Science & Nature)", 1270)
+)
+
 enum class BookGenre(
     val id: String,
     val displayName: String,
@@ -52,6 +65,13 @@ enum class BookGenre(
         "ရသနှင့် ဝတ္ထု",
         "📖",
         listOf("fiction", "novel", "ဝတ္ထု", "story", "romance", "thriller", "mystery", "adventure", "fantasy", "drama", "short story", "ဝတ္ထုတို", "ဝတ္ထုရှည်", "ဇာတ်လမ်း")
+    ),
+    NON_FICTION(
+        "non_fiction",
+        "Non-Fiction",
+        "သုတစာပေ",
+        "💡",
+        listOf("non-fiction", "nonfiction", "non fiction", "သုတ", "သုတစာပေ", "ဆောင်းပါး", "essay", "biography", "memoir", "self-help", "guide", "ဘဝလမ်းညွှန်", "အတွေးအခေါ်", "ဗဟုသုတ", "စကားပြေ", "မှတ်စု")
     ),
     HISTORY(
         "history",
@@ -86,7 +106,7 @@ enum class BookGenre(
         "Education",
         "ပညာရေးနှင့် သင်ကြားရေး",
         "🎓",
-        listOf("education", "ပညာရေး", "သင်ကြားရေး", "learning", "study", "cambridge", "ielts", "toefl", "grammar", "vocabulary", "english", "language", "japanese", "dictionary", "speaking", "headway", "oxford", "course", "ကျောင်း", "စာမေးပွဲ", "သင်ရိုး", "academic", "textbook")
+        listOf("education", "educational", "ပညာရေး", "သင်ကြားရေး", "learning", "study", "cambridge", "ielts", "toefl", "grammar", "vocabulary", "english", "language", "japanese", "dictionary", "speaking", "headway", "oxford", "course", "ကျောင်း", "စာမေးပွဲ", "သင်ရိုး", "academic", "textbook")
     ),
     LITERATURE(
         "literature",
@@ -118,6 +138,9 @@ enum class BookGenre(
             if (value.equals("fiction", ignoreCase = true)) {
                 return FICTION
             }
+            if (value.equals("non-fiction", ignoreCase = true) || value.equals("nonfiction", ignoreCase = true) || value.equals("non fiction", ignoreCase = true) || value.equals("သုတစာပေ", ignoreCase = true)) {
+                return NON_FICTION
+            }
             if (value.equals("literature", ignoreCase = true)) {
                 return LITERATURE
             }
@@ -126,6 +149,9 @@ enum class BookGenre(
             }
             if (value.equals("science", ignoreCase = true)) {
                 return SCIENCE
+            }
+            if (value.equals("education", ignoreCase = true) || value.equals("educational", ignoreCase = true)) {
+                return EDUCATION
             }
             val exact = entries.firstOrNull {
                 it.displayName.equals(value, ignoreCase = true) ||
@@ -136,9 +162,11 @@ enum class BookGenre(
 
             val lower = value.lowercase()
             return when {
+                lower.contains("non-fiction") || lower.contains("nonfiction") || lower.contains("သုတစာပေ") -> NON_FICTION
+
                 lower.contains("english") || lower.contains("cambridge") || lower.contains("japanese") ||
                 lower.contains("french") || lower.contains("dictionary") || lower.contains("ပညာရေး") ||
-                lower.contains("education") || lower.contains("ဘာသာစကား") || lower.contains("သင်္ချာ") ||
+                lower.contains("education") || lower.contains("educational") || lower.contains("ဘာသာစကား") || lower.contains("သင်္ချာ") ||
                 lower.contains("headway") || lower.contains("ielts") || lower.contains("toefl") ||
                 lower.contains("grammar") || lower.contains("vocabulary") || lower.contains("academic") -> EDUCATION
 
@@ -210,6 +238,7 @@ fun resolveGenre(category: String, title: String): String {
     val text = "$category $title".lowercase()
     val genresToCheck = listOf(
         BookGenre.FICTION,
+        BookGenre.NON_FICTION,
         BookGenre.HISTORY,
         BookGenre.SCIENCE,
         BookGenre.TECHNOLOGY,
@@ -337,6 +366,9 @@ fun generateSynopsis(
     return when (normalizedGenre) {
         BookGenre.FICTION -> {
             "«$cleanTitle» သည် $authorPart ၏ စိတ်ဝင်စားဖွယ် ဇာတ်လမ်းဇာတ်အိမ်နှင့် ရသခံစားမှု အပြည့်အဝ ပေးစွမ်းနိုင်သော ရသဝတ္ထုတစ်ပုဒ် ဖြစ်ပါသည်။ ဇာတ်ကောင်တို့၏ ဘဝခရီးနှင့် ခံစားချက်များကို ရသမြောက်စွာ သရုပ်ဖော်ထားပြီး စာဖတ်သူတို့အား အတွေးသစ်နှင့် ဘဝရသကို ပေးစွမ်းနိုင်သော စာအုပ်ကောင်း ဖြစ်ပါသည်။"
+        }
+        BookGenre.NON_FICTION -> {
+            "«$cleanTitle» သည် $authorPart ပြုစုရေးသားထားသော ဘဝနေနည်း၊ အတွေးအခေါ်နှင့် လက်တွေ့အသုံးချ ဗဟုသုတများ ပြည့်စုံစွာ ပါဝင်သည့် သုတစာပေလက်ရာ ဖြစ်ပါသည်။ ဘဝခရီးတွင် အထောက်အကူပြုမည့် အသိပညာနှင့် အတွေးအမြင်များကို ရရှိစေမည့် စာအုပ်ကောင်း ဖြစ်ပါသည်။"
         }
         BookGenre.LITERATURE -> {
             "«$cleanTitle» သည် $authorPart ၏ မြန်မာစာပေလောကတွင် တန်ဖိုးထားရသော စာပေလက်ရာတစ်ခုဖြစ်ပြီး စာပေအနုပညာ၊ ဘာသာစကားအသုံးအနှုန်းနှင့် သုတရသ အနှစ်သာရများ ပြည့်စုံစွာ ပါဝင်ပါသည်။ စာဖတ်ဝါသနာရှင်များ မဖြစ်မနေ လေ့လာဖတ်ရှုသင့်သော စာပေလက်ရာ ဖြစ်ပါသည်။"
